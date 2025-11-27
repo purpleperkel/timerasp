@@ -43,6 +43,8 @@ A Raspberry Pi timelapse camera controller with web interface, accessible at `ti
    chmod +x install.sh
    ./install.sh
    ```
+   
+   **Note:** If you get errors about `libcamera-apps`, that's fine for USB cameras! The script will skip it automatically. Or use `./install_usb_only.sh` for a cleaner USB-only install.
 
 3. **Wait for installation to complete** (takes 2-5 minutes)
 
@@ -51,6 +53,8 @@ A Raspberry Pi timelapse camera controller with web interface, accessible at `ti
    - Or use your Pi's IP address: `http://192.168.1.xxx:5000`
 
 That's it! 🎉
+
+**Having installation issues?** See [INSTALLATION_TROUBLESHOOTING.md](INSTALLATION_TROUBLESHOOTING.md)
 
 ## Manual Installation
 

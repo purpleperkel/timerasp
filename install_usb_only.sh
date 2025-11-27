@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# TimelapsePI Installation Script
-# This script sets up TimelapsePI to run on boot with timelapsepi.local domain
+# TimelapsePI Installation Script - USB Camera Only
+# This version only installs USB camera dependencies
 
 set -e
 
 echo "========================================"
-echo "TimelapsePI Installation Script"
+echo "TimelapsePI USB Camera Installation"
 echo "========================================"
 echo ""
 
@@ -28,26 +28,18 @@ echo ""
 echo "📦 Updating system packages..."
 sudo apt-get update
 
-# Install required packages
-echo "📦 Installing dependencies..."
+# Install required packages - USB camera only
+echo "📦 Installing USB camera dependencies..."
 sudo apt-get install -y \
     python3 \
     python3-pip \
-    python3-venv \
     ffmpeg \
     avahi-daemon \
     avahi-utils \
     fswebcam \
     v4l-utils
 
-# Try to install libcamera-apps (optional, for Pi Camera support)
-echo "📷 Checking for Raspberry Pi Camera support..."
-if sudo apt-cache show libcamera-apps >/dev/null 2>&1; then
-    echo "Installing libcamera-apps for Pi Camera support..."
-    sudo apt-get install -y libcamera-apps || echo "⚠️  libcamera-apps installation failed, but USB camera will still work"
-else
-    echo "ℹ️  libcamera-apps not available (this is fine for USB cameras)"
-fi
+echo "✅ USB camera tools installed successfully"
 
 # Enable and start Avahi
 echo "🌐 Enabling Avahi daemon..."
@@ -98,7 +90,26 @@ mkdir -p "$INSTALL_DIR/timelapse_data/images"
 mkdir -p "$INSTALL_DIR/timelapse_data/videos"
 mkdir -p "$INSTALL_DIR/config"
 
+# Check for USB camera
+echo ""
+echo "📷 Checking for USB camera..."
+if ls /dev/video* 1> /dev/null 2>&1; then
+    echo "✅ USB camera device(s) found:"
+    ls -la /dev/video*
+    echo ""
+    echo "Testing camera with fswebcam..."
+    if fswebcam -r 640x480 --no-banner --jpeg 85 /tmp/camera_test.jpg 2>/dev/null; then
+        echo "✅ Camera test successful!"
+        rm -f /tmp/camera_test.jpg
+    else
+        echo "⚠️  Camera test failed. Check camera connection and permissions."
+    fi
+else
+    echo "⚠️  No USB camera detected. Please plug in your USB camera."
+fi
+
 # Start the service
+echo ""
 echo "🚀 Starting TimelapsePI service..."
 sudo systemctl start timelapsepi.service
 
@@ -118,15 +129,23 @@ if sudo systemctl is-active --quiet timelapsepi.service; then
     echo "  • http://timelapsepi.local:5000"
     echo "  • http://$(hostname -I | awk '{print $1}'):5000"
     echo ""
-    echo "Useful commands:"
+    echo "🔧 USB Camera Commands:"
+    echo "  • List cameras:  lsusb"
+    echo "  • List devices:  ls -la /dev/video*"
+    echo "  • Test camera:   fswebcam test.jpg"
+    echo "  • Camera info:   v4l2-ctl --list-devices"
+    echo ""
+    echo "📋 Service Commands:"
     echo "  • Check status:  sudo systemctl status timelapsepi"
     echo "  • View logs:     sudo journalctl -u timelapsepi -f"
     echo "  • Stop service:  sudo systemctl stop timelapsepi"
     echo "  • Start service: sudo systemctl start timelapsepi"
     echo ""
-    echo "Note: If you changed the hostname, please reboot for"
-    echo "      the .local domain to work properly."
-    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        echo "⚠️  Hostname changed - reboot recommended:"
+        echo "   sudo reboot"
+        echo ""
+    fi
 else
     echo ""
     echo "❌ Service failed to start. Check logs with:"

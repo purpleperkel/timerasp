@@ -72,12 +72,15 @@ def detect_camera():
             except:
                 pass
     
-    # Fallback to libcamera for Raspberry Pi Camera
+    # Fallback to libcamera for Raspberry Pi Camera (if available)
     try:
         result = subprocess.run(['libcamera-hello', '--list-cameras'], 
                               capture_output=True, timeout=2)
         if result.returncode == 0:
             return 'libcamera'
+    except FileNotFoundError:
+        # libcamera-hello not installed, that's fine
+        pass
     except:
         pass
     
