@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TimelapsePI Controller</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📷 TimelapsePI</h1>
+            <div class="status-badge" id="statusBadge">
+                <span class="status-dot"></span>
+                <span id="statusText">Ready</span>
+            </div>
+        </header>
+
+        <main>
+            <!-- Camera Preview Section -->
+            <section class="card">
+                <h2>Camera Preview</h2>
+                <div class="preview-container">
+                    <img id="cameraPreview" src="/api/camera/preview" alt="Camera Preview">
+                    <div id="noCamera" class="no-camera" style="display: none;">
+                        <p>⚠️ No camera detected</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Control Panel -->
+            <section class="card">
+                <h2>Timelapse Control</h2>
+                
+                <div class="control-group">
+                    <label for="intervalInput">Interval (seconds):</label>
+                    <input type="number" id="intervalInput" value="5" min="1" max="3600" step="1">
+                </div>
+
+                <div class="control-group">
+                    <label for="resolutionSelect">Resolution:</label>
+                    <select id="resolutionSelect">
+                        <option value="1920,1080">1920x1080 (Full HD)</option>
+                        <option value="1280,720">1280x720 (HD)</option>
+                        <option value="640,480">640x480 (VGA)</option>
+                        <option value="3840,2160">3840x2160 (4K)</option>
+                    </select>
+                </div>
+
+                <div class="stats-panel" id="statsPanel" style="display: none;">
+                    <div class="stat">
+                        <span class="stat-label">Session:</span>
+                        <span class="stat-value" id="sessionId">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Frames Captured:</span>
+                        <span class="stat-value" id="frameCount">0</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Duration:</span>
+                        <span class="stat-value" id="duration">00:00:00</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Est. Video Length:</span>
+                        <span class="stat-value" id="videoLength">0s @ 30fps</span>
+                    </div>
+                </div>
+
+                <div class="button-group">
+                    <button id="startBtn" class="btn btn-primary">Start Timelapse</button>
+                    <button id="stopBtn" class="btn btn-danger" style="display: none;">Stop Timelapse</button>
+                </div>
+            </section>
+
+            <!-- Sessions List -->
+            <section class="card">
+                <h2>Saved Sessions</h2>
+                <div id="sessionsList" class="sessions-list">
+                    <p class="loading">Loading sessions...</p>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
