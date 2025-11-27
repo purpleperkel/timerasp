@@ -32,29 +32,42 @@ A Raspberry Pi timelapse camera controller with web interface, accessible at `ti
 
 ## Quick Installation
 
-1. **Clone or copy the files to your Raspberry Pi:**
-   ```bash
-   git clone <your-repo> timelapsepi
-   cd timelapsepi
-   ```
+**Choose the method that works best for your system:**
 
-2. **Run the installation script:**
-   ```bash
-   chmod +x install.sh
-   ./install.sh
-   ```
-   
-   **Note:** If you get errors about `libcamera-apps`, that's fine for USB cameras! The script will skip it automatically. Or use `./install_usb_only.sh` for a cleaner USB-only install.
+### Option 1: Automatic Install (Recommended)
+```bash
+cd timelapsepi
+chmod +x install.sh
+./install.sh
+```
 
-3. **Wait for installation to complete** (takes 2-5 minutes)
+### Option 2: Virtual Environment Install (Cleanest for modern systems)
+```bash
+chmod +x install_venv.sh
+./install_venv.sh
+```
 
-4. **Access the interface:**
-   - Open a browser and go to `http://timelapsepi.local:5000`
-   - Or use your Pi's IP address: `http://192.168.1.xxx:5000`
+### Option 3: USB Camera Only Install
+```bash
+chmod +x install_usb_only.sh
+./install_usb_only.sh
+```
 
-That's it! 🎉
+### Option 4: Quick Manual Install
+```bash
+sudo apt-get update && \
+sudo apt-get install -y python3 python3-pip ffmpeg avahi-daemon fswebcam v4l-utils && \
+pip3 install --user --break-system-packages flask werkzeug && \
+python3 app.py
+```
 
-**Having installation issues?** See [INSTALLATION_TROUBLESHOOTING.md](INSTALLATION_TROUBLESHOOTING.md)
+**All methods take 2-5 minutes and end with the same working system!**
+
+After installation, access at:
+- `http://timelapsepi.local:5000` or
+- `http://YOUR_PI_IP:5000`
+
+**Having installation issues?** See [INSTALLATION_TROUBLESHOOTING.md](INSTALLATION_TROUBLESHOOTING.md) or [QUICK_MANUAL_INSTALL.md](QUICK_MANUAL_INSTALL.md)
 
 ## Manual Installation
 

@@ -79,17 +79,34 @@ which ffmpeg
 
 **Error:** `error: externally-managed-environment`
 
-**Solution:** Use pip with --user flag (already in the script):
+This is a safety feature in modern Debian/Ubuntu systems (Python 3.11+) to prevent breaking system Python packages.
+
+**Solution 1: Use the updated install script** (Recommended)
+The install scripts have been updated to handle this automatically:
 ```bash
-pip3 install --user -r requirements.txt
+./install.sh
+# or
+./install_usb_only.sh
 ```
 
-Or create a virtual environment:
+**Solution 2: Use virtual environment installer** (Cleanest approach)
+```bash
+./install_venv.sh
+```
+This creates an isolated Python environment and is the recommended approach for modern systems.
+
+**Solution 3: Manual install with --break-system-packages**
+```bash
+pip3 install --user --break-system-packages -r requirements.txt
+```
+
+**Solution 4: Manual virtual environment setup**
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
+Then update the systemd service to use `venv/bin/python3` instead of system python3.
 
 ### Issue: Permission denied errors
 

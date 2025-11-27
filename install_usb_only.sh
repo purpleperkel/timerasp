@@ -58,7 +58,7 @@ cd "$INSTALL_DIR"
 
 # Install Python dependencies
 echo "🐍 Installing Python packages..."
-pip3 install --user -r requirements.txt
+pip3 install --user --break-system-packages -r requirements.txt || pip3 install --user -r requirements.txt
 
 # Make app.py executable
 chmod +x app.py

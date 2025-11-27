@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# TimelapsePI Installation Script
-# This script sets up TimelapsePI to run on boot with timelapsepi.local domain
+# TimelapsePI Installation Script - Using Python Virtual Environment
+# This is the cleanest approach for modern Python installations
 
 set -e
 
 echo "========================================"
-echo "TimelapsePI Installation Script"
+echo "TimelapsePI Installation (venv)"
 echo "========================================"
 echo ""
 
@@ -40,14 +40,7 @@ sudo apt-get install -y \
     fswebcam \
     v4l-utils
 
-# Try to install libcamera-apps (optional, for Pi Camera support)
-echo "📷 Checking for Raspberry Pi Camera support..."
-if sudo apt-cache show libcamera-apps >/dev/null 2>&1; then
-    echo "Installing libcamera-apps for Pi Camera support..."
-    sudo apt-get install -y libcamera-apps || echo "⚠️  libcamera-apps installation failed, but USB camera will still work"
-else
-    echo "ℹ️  libcamera-apps not available (this is fine for USB cameras)"
-fi
+echo "✅ System packages installed"
 
 # Enable and start Avahi
 echo "🌐 Enabling Avahi daemon..."
@@ -64,18 +57,53 @@ fi
 
 cd "$INSTALL_DIR"
 
-# Install Python dependencies
-echo "🐍 Installing Python packages..."
-pip3 install --user --break-system-packages -r requirements.txt || pip3 install --user -r requirements.txt
+# Create virtual environment
+echo "🐍 Creating Python virtual environment..."
+python3 -m venv venv
 
-# Make app.py executable
-chmod +x app.py
+# Activate and install packages
+echo "📦 Installing Python packages in virtual environment..."
+source venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+deactivate
 
-# Set up systemd service
+echo "✅ Python packages installed in venv"
+
+# Create a wrapper script to run with venv
+echo "📝 Creating startup wrapper..."
+cat > run_app.sh << 'EOF'
+#!/bin/bash
+cd "$(dirname "$0")"
+source venv/bin/activate
+python3 app.py
+EOF
+chmod +x run_app.sh
+
+# Update systemd service to use venv
 echo "⚙️  Setting up systemd service..."
-sudo cp timelapsepi.service /etc/systemd/system/
-sudo sed -i "s|User=pi|User=$USER|g" /etc/systemd/system/timelapsepi.service
-sudo sed -i "s|/home/pi/timelapsepi|$INSTALL_DIR|g" /etc/systemd/system/timelapsepi.service
+cat > timelapsepi-venv.service << EOF
+[Unit]
+Description=TimelapsePI Camera Controller
+After=network.target
+
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$INSTALL_DIR
+ExecStart=$INSTALL_DIR/venv/bin/python3 $INSTALL_DIR/app.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+Environment="PYTHONUNBUFFERED=1"
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo cp timelapsepi-venv.service /etc/systemd/system/timelapsepi.service
 sudo systemctl daemon-reload
 sudo systemctl enable timelapsepi.service
 
@@ -98,7 +126,18 @@ mkdir -p "$INSTALL_DIR/timelapse_data/images"
 mkdir -p "$INSTALL_DIR/timelapse_data/videos"
 mkdir -p "$INSTALL_DIR/config"
 
+# Check for USB camera
+echo ""
+echo "📷 Checking for USB camera..."
+if ls /dev/video* 1> /dev/null 2>&1; then
+    echo "✅ USB camera device(s) found:"
+    ls -la /dev/video*
+else
+    echo "⚠️  No USB camera detected. Please plug in your USB camera."
+fi
+
 # Start the service
+echo ""
 echo "🚀 Starting TimelapsePI service..."
 sudo systemctl start timelapsepi.service
 
@@ -118,14 +157,18 @@ if sudo systemctl is-active --quiet timelapsepi.service; then
     echo "  • http://timelapsepi.local:5000"
     echo "  • http://$(hostname -I | awk '{print $1}'):5000"
     echo ""
-    echo "Useful commands:"
+    echo "💡 This installation uses a Python virtual environment"
+    echo "   located at: $INSTALL_DIR/venv"
+    echo ""
+    echo "To run manually:"
+    echo "  cd $INSTALL_DIR"
+    echo "  ./run_app.sh"
+    echo ""
+    echo "Service commands:"
     echo "  • Check status:  sudo systemctl status timelapsepi"
     echo "  • View logs:     sudo journalctl -u timelapsepi -f"
     echo "  • Stop service:  sudo systemctl stop timelapsepi"
     echo "  • Start service: sudo systemctl start timelapsepi"
-    echo ""
-    echo "Note: If you changed the hostname, please reboot for"
-    echo "      the .local domain to work properly."
     echo ""
 else
     echo ""
