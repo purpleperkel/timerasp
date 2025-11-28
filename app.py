@@ -578,7 +578,7 @@ def camera_controls():
             pass
     
     if request.method == 'GET':
-        # Get current controls
+        # Get current controls - no camera lock needed, just reading settings
         try:
             result = subprocess.run(['v4l2-ctl', '--device', video_device, '--list-ctrls'],
                                   capture_output=True, text=True, timeout=2)
@@ -614,8 +614,10 @@ def camera_controls():
         except Exception as e:
             return jsonify({"error": str(e)}), 500
     
-    else:  # POST - set controls
+    else:  # POST - set controls - no camera lock needed, just changing settings
         data = request.json
+        
+        print(f"[Camera Controls] Received request to set: {data}")
         
         try:
             results = {}
@@ -624,6 +626,8 @@ def camera_controls():
             for control, value in data.items():
                 if control in ['brightness', 'contrast', 'saturation', 'exposure_auto', 'exposure_absolute']:
                     cmd = ['v4l2-ctl', '--device', video_device, f'--set-ctrl={control}={value}']
+                    print(f"[Camera Controls] Running: {' '.join(cmd)}")
+                    
                     result = subprocess.run(
                         cmd,
                         capture_output=True,
@@ -633,14 +637,17 @@ def camera_controls():
                     
                     if result.returncode == 0:
                         results[control] = "success"
+                        print(f"[Camera Controls] ✅ Set {control}={value}")
                     else:
                         results[control] = "failed"
                         error_msg = result.stderr.strip() if result.stderr else "Unknown error"
                         errors.append(f"{control}: {error_msg}")
-                        print(f"Error setting {control}={value}: {error_msg}")
+                        print(f"[Camera Controls] ❌ Failed to set {control}={value}: {error_msg}")
             
             if errors:
-                print(f"Camera control errors: {errors}")
+                print(f"[Camera Controls] Errors: {errors}")
+            else:
+                print(f"[Camera Controls] All settings applied successfully")
             
             return jsonify({
                 "success": len(errors) == 0,
@@ -648,7 +655,7 @@ def camera_controls():
                 "errors": errors if errors else None
             })
         except Exception as e:
-            print(f"Exception in camera controls: {str(e)}")
+            print(f"[Camera Controls] Exception: {str(e)}")
             return jsonify({"error": str(e)}), 500
 
 @app.route('/api/sessions/<session_id>/video/stream')
