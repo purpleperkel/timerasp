@@ -380,41 +380,48 @@ def list_sessions():
     
     try:
         for session_dir in sorted(IMAGES_DIR.iterdir(), reverse=True):
-            if session_dir.is_dir() and not session_dir.name.startswith('.'):
-                images = list(session_dir.glob("frame_*.jpg"))
-                video_file = VIDEOS_DIR / f"{session_dir.name}.mp4"
-                
+            # Skip if not a directory, starts with dot, or is the preview folder
+            if not session_dir.is_dir() or session_dir.name.startswith('.') or session_dir.name == 'preview':
+                continue
+            
+            images = list(session_dir.glob("frame_*.jpg"))
+            video_file = VIDEOS_DIR / f"{session_dir.name}.mp4"
+            
+            # Skip if no images found (empty directory)
+            if len(images) == 0:
+                continue
+            
+            try:
+                created_time = datetime.strptime(session_dir.name, "%Y%m%d_%H%M%S").isoformat()
+            except:
+                # If directory name doesn't match expected format, use current time
+                created_time = datetime.now().isoformat()
+            
+            # Calculate video duration if video exists
+            duration_seconds = None
+            if video_file.exists():
                 try:
-                    created_time = datetime.strptime(session_dir.name, "%Y%m%d_%H%M%S").isoformat()
-                except:
-                    # If directory name doesn't match expected format, use current time
-                    created_time = datetime.now().isoformat()
-                
-                # Calculate video duration if video exists
-                duration_seconds = None
-                if video_file.exists():
-                    try:
-                        # Use ffprobe to get video duration
-                        result = subprocess.run(
-                            ['ffprobe', '-v', 'error', '-show_entries', 
-                             'format=duration', '-of', 
-                             'default=noprint_wrappers=1:nokey=1', str(video_file)],
-                            capture_output=True,
-                            text=True,
-                            timeout=5
-                        )
-                        if result.returncode == 0:
-                            duration_seconds = float(result.stdout.strip())
-                    except:
-                        pass
-                
-                sessions.append({
-                    "id": session_dir.name,
-                    "frame_count": len(images),
-                    "has_video": video_file.exists(),
-                    "created": created_time,
-                    "duration": duration_seconds
-                })
+                    # Use ffprobe to get video duration
+                    result = subprocess.run(
+                        ['ffprobe', '-v', 'error', '-show_entries', 
+                         'format=duration', '-of', 
+                         'default=noprint_wrappers=1:nokey=1', str(video_file)],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+                    if result.returncode == 0 and result.stdout.strip():
+                        duration_seconds = float(result.stdout.strip())
+                except Exception as e:
+                    print(f"Error getting duration for {session_dir.name}: {e}")
+            
+            sessions.append({
+                "id": session_dir.name,
+                "frame_count": len(images),
+                "has_video": video_file.exists(),
+                "created": created_time,
+                "duration": duration_seconds
+            })
     except Exception as e:
         print(f"Error listing sessions: {e}")
     

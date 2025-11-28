@@ -14,6 +14,7 @@ build/
 timelapse_data/
 timelapse_data/images/*
 timelapse_data/videos/*
+timelapse_data/images/preview/
 !timelapse_data/.gitkeep
 !timelapse_data/images/.gitkeep
 !timelapse_data/videos/.gitkeep
