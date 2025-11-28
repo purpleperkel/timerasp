@@ -170,10 +170,23 @@ def capture_image(session_id, frame_number, resolution=(1920, 1080), auto_adjust
         
         cmd.append(str(filename))
         
+        print(f"[Capture] Command: {' '.join(cmd)}")
+        
         try:
-            subprocess.run(cmd, check=True, capture_output=True, timeout=10)
+            result = subprocess.run(cmd, check=True, capture_output=True, timeout=10)
+            print(f"[Capture] Frame {frame_number} captured successfully to {filename}")
+            print(f"[Capture] File exists: {filename.exists()}, size: {filename.stat().st_size if filename.exists() else 0} bytes")
+        except subprocess.CalledProcessError as e:
+            error_msg = e.stderr.decode('utf-8') if e.stderr else 'Unknown error'
+            print(f"[Capture] ERROR: Failed to capture frame {frame_number}: {error_msg}")
+            print(f"[Capture] Command was: {' '.join(cmd)}")
+            return False
+            return False
         except subprocess.TimeoutExpired:
-            print(f"Timeout capturing frame {frame_number}")
+            print(f"[Capture] ERROR: Timeout capturing frame {frame_number}")
+            return False
+        except Exception as e:
+            print(f"[Capture] ERROR: Exception capturing frame {frame_number}: {e}")
             return False
     elif camera_type == 'libcamera':
         # Use libcamera-still for Raspberry Pi Camera
@@ -255,23 +268,29 @@ def timelapse_worker(session_id, interval, resolution, scheduled_start=None, sch
         if scheduled_end:
             end_dt = datetime.fromisoformat(scheduled_end.replace('Z', '+00:00'))
             if datetime.now(end_dt.tzinfo or None) >= end_dt:
-                print(f"Reached scheduled end time, stopping timelapse")
+                print(f"[Timelapse] Reached scheduled end time, stopping timelapse")
                 timelapse_state["active"] = False
                 break
         
         try:
+            print(f"[Timelapse] Attempting to capture frame {frame_number}")
             with camera_lock:
                 success = capture_image(session_id, frame_number, resolution, auto_adjust, ir_mode)
             
             if success:
                 frame_number += 1
                 timelapse_state["total_frames"] = frame_number
+                print(f"[Timelapse] Frame {frame_number - 1} captured. Total frames: {frame_number}")
+            else:
+                print(f"[Timelapse] WARNING: Frame {frame_number} capture returned False")
             
             # Wait for the interval
             time.sleep(interval)
             
         except Exception as e:
-            print(f"Error capturing frame: {e}")
+            print(f"[Timelapse] ERROR: Exception capturing frame {frame_number}: {e}")
+            import traceback
+            traceback.print_exc()
             time.sleep(1)
 
 def compile_video(session_id, fps=30, rotation=0):
@@ -387,14 +406,22 @@ def start_timelapse():
     
     data = request.json or {}
     interval = data.get('interval', 5)
-    resolution = data.get('resolution', [1920, 1080])
+    resolution_list = data.get('resolution', [1920, 1080])
+    resolution = tuple(resolution_list) if isinstance(resolution_list, list) else resolution_list
     scheduled_start = data.get('scheduled_start')  # ISO datetime string
     scheduled_end = data.get('scheduled_end')      # ISO datetime string
     auto_adjust = data.get('auto_adjust', False)   # Enable auto-adjustment
     ir_mode = data.get('ir_mode', 'auto')          # 'on', 'off', or 'auto'
     
+    print(f"[Start] Starting timelapse:")
+    print(f"  - Interval: {interval}s")
+    print(f"  - Resolution: {resolution} (type: {type(resolution)})")
+    print(f"  - Auto-adjust: {auto_adjust}")
+    print(f"  - IR Mode: {ir_mode}")
+    
     # Create new session
     session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    print(f"  - Session ID: {session_id}")
     
     # Update state
     timelapse_state["active"] = True
@@ -419,6 +446,8 @@ def start_timelapse():
     )
     thread.start()
     timelapse_state["thread"] = thread
+    
+    print(f"[Start] Timelapse worker thread started")
     
     return jsonify({
         "success": True,
