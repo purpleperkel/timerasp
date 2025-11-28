@@ -916,3 +916,68 @@ async function rotateVideo(sessionId) {
         alert('Error rotating video');
     }
 }
+
+// Load available camera devices
+async function loadCameraDevices() {
+    try {
+        const response = await fetch('/api/camera/devices');
+        const data = await response.json();
+        
+        const select = document.getElementById('cameraDeviceSelect');
+        select.innerHTML = '';
+        
+        if (data.devices && data.devices.length > 0) {
+            data.devices.forEach(device => {
+                const option = document.createElement('option');
+                option.value = device.device;
+                option.textContent = `${device.device} - ${device.name}`;
+                if (device.device === data.current_device) {
+                    option.selected = true;
+                }
+                select.appendChild(option);
+            });
+            
+            // Add change handler
+            select.addEventListener('change', async (e) => {
+                const newDevice = e.target.value;
+                try {
+                    const response = await fetch('/api/camera/device', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ device: newDevice })
+                    });
+                    
+                    const result = await response.json();
+                    if (result.success) {
+                        console.log('Camera device changed to:', newDevice);
+                        // Reload preview to use new device
+                        const previewImg = document.getElementById('previewImage');
+                        if (previewImg) {
+                            previewImg.src = '/api/camera/preview?' + new Date().getTime();
+                        }
+                    } else {
+                        alert('Failed to change camera device: ' + result.error);
+                        loadCameraDevices(); // Reload to reset selection
+                    }
+                } catch (error) {
+                    console.error('Error changing camera device:', error);
+                    alert('Error changing camera device');
+                    loadCameraDevices(); // Reload to reset selection
+                }
+            });
+        } else {
+            const option = document.createElement('option');
+            option.textContent = 'No cameras detected';
+            select.appendChild(option);
+        }
+    } catch (error) {
+        console.error('Error loading camera devices:', error);
+    }
+}
+
+// Call on page load
+document.addEventListener('DOMContentLoaded', () => {
+    loadCameraDevices();
+});

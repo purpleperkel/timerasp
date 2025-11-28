@@ -59,33 +59,88 @@ def save_config(config):
     with open(CONFIG_FILE, 'w') as f:
         json.dump(config, f, indent=2)
 
-def detect_camera():
-    """Detect available camera"""
-    # Check for V4L2 devices (USB cameras) first
-    video_devices = list(Path('/dev').glob('video*'))
-    if video_devices:
-        # Filter out metadata devices, keep only actual video capture devices
-        for device in video_devices:
-            try:
-                # Check if it's a valid video capture device
-                result = subprocess.run(['v4l2-ctl', '--device', str(device), '--all'], 
-                                      capture_output=True, timeout=1)
-                if b'Video Capture' in result.stdout:
-                    return 'usb'
-            except:
-                pass
+def detect_usb_camera_devices():
+    """Detect all available USB camera devices that can actually capture
     
-    # Fallback to libcamera for Raspberry Pi Camera (if available)
-    try:
-        result = subprocess.run(['libcamera-hello', '--list-cameras'], 
-                              capture_output=True, timeout=2)
-        if result.returncode == 0:
-            return 'libcamera'
-    except FileNotFoundError:
-        # libcamera-hello not installed, that's fine
-        pass
-    except:
-        pass
+    Returns:
+        list: List of dicts with device info: [{'device': '/dev/video0', 'name': 'Logitech Webcam'}]
+    """
+    devices = []
+    video_devices = sorted(Path('/dev').glob('video*'))
+    
+    for device in video_devices:
+        try:
+            # Try to get device info
+            result = subprocess.run(
+                ['v4l2-ctl', '--device', str(device), '--all'],
+                capture_output=True,
+                timeout=1,
+                text=True
+            )
+            
+            # Must have Video Capture capability
+            if 'Video Capture' not in result.stdout:
+                continue
+            
+            # Extract device name
+            device_name = str(device).split('/')[-1]
+            for line in result.stdout.split('\n'):
+                if 'Card type' in line or 'Device name' in line:
+                    parts = line.split(':', 1)
+                    if len(parts) > 1:
+                        device_name = parts[1].strip()
+                        break
+            
+            # Test if fswebcam can actually capture from this device
+            # This is the key test - some devices show as "Video Capture" but can't capture
+            test_result = subprocess.run(
+                ['fswebcam', '-d', str(device), '-r', '640x480', '--no-banner', '-'],
+                capture_output=True,
+                timeout=3
+            )
+            
+            # If fswebcam succeeded and produced output, this device works
+            if test_result.returncode == 0 and len(test_result.stdout) > 1000:
+                devices.append({
+                    'device': str(device),
+                    'name': device_name
+                })
+                print(f"[Device Detection] Found working camera: {device} ({device_name})")
+            else:
+                print(f"[Device Detection] Skipping {device} - fswebcam test failed")
+                
+        except Exception as e:
+            print(f"[Device Detection] Error checking {device}: {e}")
+            continue
+    
+    return devices
+
+def get_default_camera_device():
+    """Get the default/best camera device to use
+    
+    Returns:
+        str: Path to camera device like '/dev/video0'
+    """
+    devices = detect_usb_camera_devices()
+    
+    if devices:
+        default_device = devices[0]['device']
+        print(f"[Device Detection] Using default camera: {default_device}")
+        return default_device
+    
+    print("[Device Detection] No working USB camera found")
+    return '/dev/video0'  # Fallback
+
+def detect_camera():
+    """Detect camera type (preserved for backward compatibility)"""
+    devices = detect_usb_camera_devices()
+    if devices:
+        return 'usb'
+    
+    # Check for libcamera
+    result = subprocess.run(['which', 'libcamera-still'], capture_output=True)
+    if result.returncode == 0:
+        return 'libcamera'
     
     return None
 
@@ -100,25 +155,21 @@ def capture_image(session_id, frame_number, resolution=(1920, 1080), auto_adjust
         ir_mode: 'on', 'off', or 'auto' (auto-detect based on brightness)
     """
     session_dir = IMAGES_DIR / session_id
-    session_dir.mkdir(exist_ok=True)
+    session_dir.mkdir(parents=True, exist_ok=True)
+    
+    print(f"[Capture] Session directory: {session_dir}")
+    print(f"[Capture] Directory exists: {session_dir.exists()}")
+    print(f"[Capture] Directory is writable: {os.access(session_dir, os.W_OK)}")
     
     filename = session_dir / f"frame_{frame_number:06d}.jpg"
     
     camera_type = detect_camera()
     
     if camera_type == 'usb':
-        # Find the video device
-        video_device = '/dev/video0'
-        video_devices = list(Path('/dev').glob('video*'))
-        for device in video_devices:
-            try:
-                result = subprocess.run(['v4l2-ctl', '--device', str(device), '--all'], 
-                                      capture_output=True, timeout=1)
-                if b'Video Capture' in result.stdout:
-                    video_device = str(device)
-                    break
-            except:
-                pass
+        # Get configured camera device from config or use default
+        config = load_config()
+        video_device = config.get('camera_device', get_default_camera_device())
+        print(f"[Capture] Using camera device: {video_device}")
         
         # Handle IR mode switching
         if ir_mode == 'auto':
@@ -174,8 +225,42 @@ def capture_image(session_id, frame_number, resolution=(1920, 1080), auto_adjust
         
         try:
             result = subprocess.run(cmd, check=True, capture_output=True, timeout=10)
-            print(f"[Capture] Frame {frame_number} captured successfully to {filename}")
-            print(f"[Capture] File exists: {filename.exists()}, size: {filename.stat().st_size if filename.exists() else 0} bytes")
+            
+            # Give filesystem a moment to sync
+            time.sleep(0.1)
+            
+            # Check if file exists
+            file_exists = filename.exists()
+            file_size = filename.stat().st_size if file_exists else 0
+            
+            print(f"[Capture] Frame {frame_number} - fswebcam returned success")
+            print(f"[Capture] Expected file: {filename}")
+            print(f"[Capture] File exists: {file_exists}, size: {file_size} bytes")
+            
+            if not file_exists:
+                # Debug: list what's actually in the directory
+                print(f"[Capture] DEBUG: Listing directory contents:")
+                try:
+                    for item in session_dir.iterdir():
+                        print(f"[Capture]   - {item.name}")
+                except Exception as e:
+                    print(f"[Capture]   ERROR listing directory: {e}")
+                    
+                # Check stdout/stderr from fswebcam
+                if result.stdout:
+                    print(f"[Capture] fswebcam stdout: {result.stdout.decode('utf-8')}")
+                if result.stderr:
+                    print(f"[Capture] fswebcam stderr: {result.stderr.decode('utf-8')}")
+                    
+                return False
+                
+            if file_size == 0:
+                print(f"[Capture] WARNING: File created but has 0 bytes!")
+                return False
+                
+            print(f"[Capture] SUCCESS: Frame {frame_number} captured ({file_size} bytes)")
+            return True
+            
         except subprocess.CalledProcessError as e:
             error_msg = e.stderr.decode('utf-8') if e.stderr else 'Unknown error'
             print(f"[Capture] ERROR: Failed to capture frame {frame_number}: {error_msg}")
@@ -667,18 +752,9 @@ def camera_preview():
             print("[Preview] No USB camera detected")
             return
         
-        # Find video device
-        video_device = '/dev/video0'
-        video_devices = sorted(Path('/dev').glob('video*'))
-        for device in video_devices:
-            try:
-                result = subprocess.run(['v4l2-ctl', '--device', str(device), '--all'], 
-                                      capture_output=True, timeout=1)
-                if b'Video Capture' in result.stdout:
-                    video_device = str(device)
-                    break
-            except:
-                pass
+        # Get configured camera device
+        config = load_config()
+        video_device = config.get('camera_device', get_default_camera_device())
         
         print(f"[Preview] Using device: {video_device}")
         
@@ -1125,5 +1201,51 @@ def test_camera():
                 "error": error
             }), 500
             
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/camera/devices')
+def get_camera_devices():
+    """Get list of available camera devices"""
+    try:
+        devices = detect_usb_camera_devices()
+        config = load_config()
+        current_device = config.get('camera_device', get_default_camera_device())
+        
+        return jsonify({
+            "devices": devices,
+            "current_device": current_device
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/camera/device', methods=['POST'])
+def set_camera_device():
+    """Set the camera device to use"""
+    try:
+        data = request.json or {}
+        device = data.get('device')
+        
+        if not device:
+            return jsonify({"error": "No device specified"}), 400
+        
+        # Verify device exists and works
+        devices = detect_usb_camera_devices()
+        device_valid = any(d['device'] == device for d in devices)
+        
+        if not device_valid:
+            return jsonify({"error": f"Device {device} not found or not working"}), 400
+        
+        # Save to config
+        config = load_config()
+        config['camera_device'] = device
+        save_config(config)
+        
+        print(f"[Config] Camera device set to: {device}")
+        
+        return jsonify({
+            "success": True,
+            "device": device
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
