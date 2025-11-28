@@ -632,26 +632,70 @@ def camera_preview():
     """Live camera preview stream"""
     def generate_frames():
         """Generate frames for MJPEG stream"""
+        camera_type = detect_camera()
+        
+        if camera_type != 'usb':
+            print("[Preview] No USB camera detected")
+            return
+        
+        # Find video device
+        video_device = '/dev/video0'
+        video_devices = sorted(Path('/dev').glob('video*'))
+        for device in video_devices:
+            try:
+                result = subprocess.run(['v4l2-ctl', '--device', str(device), '--all'], 
+                                      capture_output=True, timeout=1)
+                if b'Video Capture' in result.stdout:
+                    video_device = str(device)
+                    break
+            except:
+                pass
+        
+        print(f"[Preview] Using device: {video_device}")
+        
+        frame_count = 0
         while True:
             try:
-                # Capture to temporary file with auto-adjust enabled for preview
-                temp_file = IMAGES_DIR / "preview"
-                temp_file.mkdir(exist_ok=True)
+                # Capture directly to temp file without session directory
+                temp_file = Path('/tmp/timelapsepi_preview.jpg')
                 
-                with camera_lock:
-                    capture_image("preview", 0, resolution=(640, 480), auto_adjust=True, ir_mode='off')
-                    
-                preview_frame = temp_file / "frame_000000.jpg"
-                if preview_frame.exists():
-                    with open(preview_frame, 'rb') as f:
+                # Simple fswebcam capture
+                cmd = [
+                    'fswebcam',
+                    '-d', video_device,
+                    '-r', '640x480',
+                    '--no-banner',
+                    '--jpeg', '90',
+                    '-S', '2',  # Skip 2 frames
+                    str(temp_file)
+                ]
+                
+                result = subprocess.run(cmd, capture_output=True, timeout=5)
+                
+                if result.returncode == 0 and temp_file.exists():
+                    with open(temp_file, 'rb') as f:
                         frame = f.read()
+                    
+                    frame_count += 1
+                    if frame_count % 10 == 0:
+                        print(f"[Preview] Frame {frame_count} captured ({len(frame)} bytes)")
                     
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                    
+                    # Clean up
+                    temp_file.unlink()
+                else:
+                    error_msg = result.stderr.decode('utf-8') if result.stderr else "Unknown error"
+                    print(f"[Preview] Capture failed: {error_msg}")
                 
                 time.sleep(0.5)  # 2 FPS preview
+                
+            except subprocess.TimeoutExpired:
+                print(f"[Preview] Timeout capturing frame")
+                time.sleep(1)
             except Exception as e:
-                print(f"Preview error: {e}")
+                print(f"[Preview] Error: {e}")
                 import traceback
                 traceback.print_exc()
                 time.sleep(1)
@@ -998,3 +1042,59 @@ def cancel_shutdown():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
+
+@app.route('/api/camera/test')
+def test_camera():
+    """Test camera capture"""
+    try:
+        camera_type = detect_camera()
+        
+        if camera_type != 'usb':
+            return jsonify({"error": "No USB camera detected", "camera_type": camera_type}), 400
+        
+        # Find video device
+        video_device = '/dev/video0'
+        video_devices = sorted(Path('/dev').glob('video*'))
+        for device in video_devices:
+            try:
+                result = subprocess.run(['v4l2-ctl', '--device', str(device), '--all'], 
+                                      capture_output=True, timeout=1)
+                if b'Video Capture' in result.stdout:
+                    video_device = str(device)
+                    break
+            except:
+                pass
+        
+        # Test capture
+        temp_file = Path('/tmp/camera_test.jpg')
+        cmd = [
+            'fswebcam',
+            '-d', video_device,
+            '-r', '640x480',
+            '--no-banner',
+            '--jpeg', '90',
+            '-S', '2',
+            str(temp_file)
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, timeout=10)
+        
+        if result.returncode == 0 and temp_file.exists():
+            size = temp_file.stat().st_size
+            temp_file.unlink()
+            return jsonify({
+                "success": True,
+                "device": video_device,
+                "camera_type": camera_type,
+                "test_capture_size": size
+            })
+        else:
+            error = result.stderr.decode('utf-8') if result.stderr else "Unknown error"
+            return jsonify({
+                "success": False,
+                "device": video_device,
+                "error": error
+            }), 500
+            
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
