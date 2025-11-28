@@ -484,16 +484,37 @@ async function loadCameraSettings() {
                 document.getElementById('saturationValue').textContent = data.controls.saturation;
             }
             
-            if (data.controls.exposure_absolute !== undefined) {
-                document.getElementById('exposureSlider').value = data.controls.exposure_absolute;
-                document.getElementById('exposureValue').textContent = data.controls.exposure_absolute;
-            }
+            // Show/hide exposure controls based on availability
+            const autoExposureCheckbox = document.getElementById('autoExposureCheckbox');
+            const manualExposureGroup = document.getElementById('manualExposureGroup');
             
-            if (data.controls.exposure_auto !== undefined) {
-                // exposure_auto: 3=auto, 1=manual
-                const isAuto = data.controls.exposure_auto === 3;
-                document.getElementById('autoExposureCheckbox').checked = isAuto;
-                document.getElementById('manualExposureGroup').style.display = isAuto ? 'none' : 'block';
+            if (data.controls.exposure_auto !== undefined || data.controls.exposure_absolute !== undefined) {
+                // Camera has exposure controls
+                if (data.controls.exposure_absolute !== undefined) {
+                    document.getElementById('exposureSlider').value = data.controls.exposure_absolute;
+                    document.getElementById('exposureValue').textContent = data.controls.exposure_absolute;
+                }
+                
+                if (data.controls.exposure_auto !== undefined) {
+                    // exposure_auto: 3=auto, 1=manual
+                    const isAuto = data.controls.exposure_auto === 3;
+                    autoExposureCheckbox.checked = isAuto;
+                    manualExposureGroup.style.display = isAuto ? 'none' : 'block';
+                }
+                
+                // Show the exposure controls
+                if (autoExposureCheckbox.parentElement) {
+                    autoExposureCheckbox.parentElement.style.display = 'block';
+                }
+            } else {
+                // Camera doesn't have exposure controls - hide them
+                if (autoExposureCheckbox.parentElement) {
+                    autoExposureCheckbox.parentElement.style.display = 'none';
+                }
+                if (manualExposureGroup) {
+                    manualExposureGroup.style.display = 'none';
+                }
+                console.log('Camera does not support exposure controls - hiding them');
             }
         } else if (data.error) {
             console.error('Camera controls error:', data.error);
@@ -509,18 +530,36 @@ async function loadCameraSettings() {
 }
 
 async function applyCameraSettings() {
-    const settings = {
-        brightness: parseInt(document.getElementById('brightnessSlider').value),
-        contrast: parseInt(document.getElementById('contrastSlider').value),
-        saturation: parseInt(document.getElementById('saturationSlider').value)
-    };
+    const settings = {};
     
-    // Add exposure settings
-    const autoExposure = document.getElementById('autoExposureCheckbox').checked;
-    settings.exposure_auto = autoExposure ? 3 : 1;
+    // Only add controls that exist (have sliders visible)
+    const brightnessSlider = document.getElementById('brightnessSlider');
+    const contrastSlider = document.getElementById('contrastSlider');
+    const saturationSlider = document.getElementById('saturationSlider');
+    const autoExposureCheckbox = document.getElementById('autoExposureCheckbox');
+    const exposureSlider = document.getElementById('exposureSlider');
     
-    if (!autoExposure) {
-        settings.exposure_absolute = parseInt(document.getElementById('exposureSlider').value);
+    if (brightnessSlider && brightnessSlider.offsetParent !== null) {
+        settings.brightness = parseInt(brightnessSlider.value);
+    }
+    
+    if (contrastSlider && contrastSlider.offsetParent !== null) {
+        settings.contrast = parseInt(contrastSlider.value);
+    }
+    
+    if (saturationSlider && saturationSlider.offsetParent !== null) {
+        settings.saturation = parseInt(saturationSlider.value);
+    }
+    
+    // Only add exposure if the checkbox is visible
+    if (autoExposureCheckbox && autoExposureCheckbox.parentElement && 
+        autoExposureCheckbox.parentElement.style.display !== 'none') {
+        const autoExposure = autoExposureCheckbox.checked;
+        settings.exposure_auto = autoExposure ? 3 : 1;
+        
+        if (!autoExposure && exposureSlider) {
+            settings.exposure_absolute = parseInt(exposureSlider.value);
+        }
     }
     
     console.log('Applying camera settings:', settings);
@@ -548,6 +587,11 @@ async function applyCameraSettings() {
                 btn.textContent = originalText;
                 btn.style.background = '';
             }, 2000);
+            
+            // Show info about skipped controls
+            if (data.skipped && data.skipped.length > 0) {
+                console.log('Skipped unavailable controls:', data.skipped);
+            }
             
             // Reload current settings to verify
             setTimeout(loadCameraSettings, 500);

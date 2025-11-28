@@ -603,27 +603,48 @@ def camera_controls():
             
             controls = {}
             for line in result.stdout.split('\n'):
-                if 'brightness' in line.lower():
-                    # Parse: brightness 0x00980900 (int) : min=0 max=255 step=1 default=128 value=128
+                # More flexible parsing - handle various control name formats
+                line_lower = line.lower()
+                
+                if 'brightness' in line_lower and 'value=' in line:
                     parts = line.split('value=')
                     if len(parts) > 1:
-                        controls['brightness'] = int(parts[1].split()[0])
-                elif 'contrast' in line.lower() and 'auto' not in line.lower():
+                        try:
+                            controls['brightness'] = int(parts[1].split()[0])
+                        except:
+                            pass
+                            
+                elif 'contrast' in line_lower and 'auto' not in line_lower and 'value=' in line:
                     parts = line.split('value=')
                     if len(parts) > 1:
-                        controls['contrast'] = int(parts[1].split()[0])
-                elif 'saturation' in line.lower():
+                        try:
+                            controls['contrast'] = int(parts[1].split()[0])
+                        except:
+                            pass
+                            
+                elif 'saturation' in line_lower and 'value=' in line:
                     parts = line.split('value=')
                     if len(parts) > 1:
-                        controls['saturation'] = int(parts[1].split()[0])
-                elif 'exposure_auto ' in line.lower():
+                        try:
+                            controls['saturation'] = int(parts[1].split()[0])
+                        except:
+                            pass
+                            
+                elif 'exposure_auto' in line_lower and 'value=' in line:
                     parts = line.split('value=')
                     if len(parts) > 1:
-                        controls['exposure_auto'] = int(parts[1].split()[0])
-                elif 'exposure_absolute' in line.lower():
+                        try:
+                            controls['exposure_auto'] = int(parts[1].split()[0])
+                        except:
+                            pass
+                            
+                elif 'exposure_absolute' in line_lower and 'value=' in line:
                     parts = line.split('value=')
                     if len(parts) > 1:
-                        controls['exposure_absolute'] = int(parts[1].split()[0])
+                        try:
+                            controls['exposure_absolute'] = int(parts[1].split()[0])
+                        except:
+                            pass
             
             print(f"[Camera Controls] GET from {video_device}: {controls}")
             
@@ -640,38 +661,70 @@ def camera_controls():
         print(f"[Camera Controls] Received request to set on {video_device}: {data}")
         
         try:
+            # First, get list of available controls for this device
+            available_result = subprocess.run(
+                ['v4l2-ctl', '--device', video_device, '--list-ctrls'],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            
+            # Parse available controls
+            available_controls = set()
+            for line in available_result.stdout.split('\n'):
+                # Extract control name from line like "brightness 0x00980900 (int) : ..."
+                parts = line.strip().split()
+                if parts and not line.startswith(' '):
+                    control_name = parts[0].lower()
+                    available_controls.add(control_name)
+            
+            print(f"[Camera Controls] Available controls: {available_controls}")
+            
             results = {}
             errors = []
+            skipped = []
             
             for control, value in data.items():
-                if control in ['brightness', 'contrast', 'saturation', 'exposure_auto', 'exposure_absolute']:
-                    cmd = ['v4l2-ctl', '--device', video_device, f'--set-ctrl={control}={value}']
-                    print(f"[Camera Controls] Running: {' '.join(cmd)}")
-                    
-                    result = subprocess.run(
-                        cmd,
-                        capture_output=True,
-                        text=True,
-                        timeout=2
-                    )
-                    
-                    if result.returncode == 0:
-                        results[control] = "success"
-                        print(f"[Camera Controls] ✅ Set {control}={value}")
-                    else:
-                        results[control] = "failed"
-                        error_msg = result.stderr.strip() if result.stderr else "Unknown error"
-                        errors.append(f"{control}: {error_msg}")
-                        print(f"[Camera Controls] ❌ Failed to set {control}={value}: {error_msg}")
+                if control not in ['brightness', 'contrast', 'saturation', 'exposure_auto', 'exposure_absolute']:
+                    continue
+                
+                # Check if this control exists on the camera
+                if control not in available_controls:
+                    skipped.append(control)
+                    print(f"[Camera Controls] ⚠️  Skipping {control} (not available on this camera)")
+                    continue
+                
+                cmd = ['v4l2-ctl', '--device', video_device, f'--set-ctrl={control}={value}']
+                print(f"[Camera Controls] Running: {' '.join(cmd)}")
+                
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=2
+                )
+                
+                if result.returncode == 0:
+                    results[control] = "success"
+                    print(f"[Camera Controls] ✅ Set {control}={value}")
+                else:
+                    results[control] = "failed"
+                    error_msg = result.stderr.strip() if result.stderr else "Unknown error"
+                    errors.append(f"{control}: {error_msg}")
+                    print(f"[Camera Controls] ❌ Failed to set {control}={value}: {error_msg}")
+            
+            if skipped:
+                print(f"[Camera Controls] Skipped unavailable controls: {skipped}")
             
             if errors:
                 print(f"[Camera Controls] Errors: {errors}")
             else:
-                print(f"[Camera Controls] All settings applied successfully")
+                print(f"[Camera Controls] All available settings applied successfully")
             
             return jsonify({
                 "success": len(errors) == 0,
                 "results": results,
+                "skipped": skipped if skipped else None,
                 "errors": errors if errors else None
             })
         except Exception as e:
