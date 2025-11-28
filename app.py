@@ -634,13 +634,16 @@ def camera_preview():
         """Generate frames for MJPEG stream"""
         while True:
             try:
-                # Capture to temporary file
-                temp_file = IMAGES_DIR / "preview.jpg"
+                # Capture to temporary file with auto-adjust enabled for preview
+                temp_file = IMAGES_DIR / "preview"
+                temp_file.mkdir(exist_ok=True)
+                
                 with camera_lock:
-                    capture_image("preview", 0, resolution=(640, 480))
+                    capture_image("preview", 0, resolution=(640, 480), auto_adjust=True, ir_mode='off')
                     
-                if temp_file.parent.joinpath("preview/frame_000000.jpg").exists():
-                    with open(temp_file.parent / "preview/frame_000000.jpg", 'rb') as f:
+                preview_frame = temp_file / "frame_000000.jpg"
+                if preview_frame.exists():
+                    with open(preview_frame, 'rb') as f:
                         frame = f.read()
                     
                     yield (b'--frame\r\n'
@@ -649,6 +652,8 @@ def camera_preview():
                 time.sleep(0.5)  # 2 FPS preview
             except Exception as e:
                 print(f"Preview error: {e}")
+                import traceback
+                traceback.print_exc()
                 time.sleep(1)
     
     return Response(generate_frames(),
@@ -738,18 +743,22 @@ def camera_controls():
                         except:
                             pass
                             
-                elif 'exposure_auto' in line_lower and 'value=' in line:
+                # Check for auto_exposure (actual v4l2 control name)
+                elif 'auto_exposure' in line_lower and 'value=' in line:
                     parts = line.split('value=')
                     if len(parts) > 1:
                         try:
+                            # Map to frontend name
                             controls['exposure_auto'] = int(parts[1].split()[0])
                         except:
                             pass
                             
-                elif 'exposure_absolute' in line_lower and 'value=' in line:
+                # Check for exposure_time_absolute (actual v4l2 control name)
+                elif 'exposure_time_absolute' in line_lower and 'value=' in line:
                     parts = line.split('value=')
                     if len(parts) > 1:
                         try:
+                            # Map to frontend name
                             controls['exposure_absolute'] = int(parts[1].split()[0])
                         except:
                             pass
@@ -793,16 +802,27 @@ def camera_controls():
             skipped = []
             
             for control, value in data.items():
-                if control not in ['brightness', 'contrast', 'saturation', 'exposure_auto', 'exposure_absolute']:
+                # Map frontend control names to actual v4l2 control names
+                control_mapping = {
+                    'brightness': 'brightness',
+                    'contrast': 'contrast',
+                    'saturation': 'saturation',
+                    'exposure_auto': 'auto_exposure',  # Frontend uses exposure_auto, camera uses auto_exposure
+                    'exposure_absolute': 'exposure_time_absolute'  # Frontend uses exposure_absolute, camera uses exposure_time_absolute
+                }
+                
+                if control not in control_mapping:
                     continue
+                
+                actual_control = control_mapping[control]
                 
                 # Check if this control exists on the camera
-                if control not in available_controls:
+                if actual_control not in available_controls:
                     skipped.append(control)
-                    print(f"[Camera Controls] ⚠️  Skipping {control} (not available on this camera)")
+                    print(f"[Camera Controls] ⚠️  Skipping {control} ({actual_control} not available on this camera)")
                     continue
                 
-                cmd = ['v4l2-ctl', '--device', video_device, f'--set-ctrl={control}={value}']
+                cmd = ['v4l2-ctl', '--device', video_device, f'--set-ctrl={actual_control}={value}']
                 print(f"[Camera Controls] Running: {' '.join(cmd)}")
                 
                 result = subprocess.run(
@@ -814,12 +834,12 @@ def camera_controls():
                 
                 if result.returncode == 0:
                     results[control] = "success"
-                    print(f"[Camera Controls] ✅ Set {control}={value}")
+                    print(f"[Camera Controls] ✅ Set {actual_control}={value}")
                 else:
                     results[control] = "failed"
                     error_msg = result.stderr.strip() if result.stderr else "Unknown error"
                     errors.append(f"{control}: {error_msg}")
-                    print(f"[Camera Controls] ❌ Failed to set {control}={value}: {error_msg}")
+                    print(f"[Camera Controls] ❌ Failed to set {actual_control}={value}: {error_msg}")
             
             if skipped:
                 print(f"[Camera Controls] Skipped unavailable controls: {skipped}")
