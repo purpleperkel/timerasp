@@ -564,18 +564,36 @@ def camera_controls():
     if camera_type != 'usb':
         return jsonify({"error": "Camera controls only available for USB cameras"}), 400
     
-    # Find video device
-    video_device = '/dev/video0'
-    video_devices = list(Path('/dev').glob('video*'))
+    # Find video device with actual controls
+    # Some systems have multiple video devices (metadata, actual camera, etc.)
+    video_device = None
+    video_devices = sorted(Path('/dev').glob('video*'))
+    
     for device in video_devices:
         try:
+            # Check if it's a video capture device
             result = subprocess.run(['v4l2-ctl', '--device', str(device), '--all'], 
-                                  capture_output=True, timeout=1)
-            if b'Video Capture' in result.stdout:
+                                  capture_output=True, timeout=1, text=True)
+            
+            if 'Video Capture' not in result.stdout:
+                continue
+            
+            # Check if it has controls we care about
+            ctrl_result = subprocess.run(['v4l2-ctl', '--device', str(device), '--list-ctrls'],
+                                        capture_output=True, timeout=1, text=True)
+            
+            # Look for brightness control as indicator this is the right device
+            if 'brightness' in ctrl_result.stdout.lower():
                 video_device = str(device)
+                print(f"[Camera Controls] Found camera with controls at {video_device}")
                 break
         except:
             pass
+    
+    if not video_device:
+        # Fallback to /dev/video0 if nothing found
+        video_device = '/dev/video0'
+        print(f"[Camera Controls] No device with controls found, using {video_device}")
     
     if request.method == 'GET':
         # Get current controls - no camera lock needed, just reading settings
@@ -607,6 +625,8 @@ def camera_controls():
                     if len(parts) > 1:
                         controls['exposure_absolute'] = int(parts[1].split()[0])
             
+            print(f"[Camera Controls] GET from {video_device}: {controls}")
+            
             return jsonify({
                 "device": video_device,
                 "controls": controls
@@ -617,7 +637,7 @@ def camera_controls():
     else:  # POST - set controls - no camera lock needed, just changing settings
         data = request.json
         
-        print(f"[Camera Controls] Received request to set: {data}")
+        print(f"[Camera Controls] Received request to set on {video_device}: {data}")
         
         try:
             results = {}
