@@ -234,6 +234,7 @@ h1 {
 .control-group input[type="checkbox"] {
     width: 51px;
     height: 31px;
+    flex-shrink: 0;
     appearance: none;
     background: rgba(120, 120, 128, 0.32);
     border-radius: 16px;
@@ -241,7 +242,6 @@ h1 {
     cursor: pointer;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     border: none;
-    vertical-align: middle;
     margin-right: 10px;
 }
 
@@ -266,9 +266,22 @@ h1 {
     left: 22px;
 }
 
+/* Labels - flexible for checkboxes, block for others */
 .control-group label {
+    display: flex;
+    align-items: center;
     cursor: pointer;
     user-select: none;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: #ffffff;
+    font-size: 0.95em;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* Labels with 'for' attribute (pointing to other inputs) should be block */
+.control-group label[for] {
+    display: block;
 }
 
 /* Sliders - iOS Style */
