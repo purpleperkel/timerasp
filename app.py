@@ -619,19 +619,36 @@ def camera_controls():
         
         try:
             results = {}
+            errors = []
+            
             for control, value in data.items():
                 if control in ['brightness', 'contrast', 'saturation', 'exposure_auto', 'exposure_absolute']:
+                    cmd = ['v4l2-ctl', '--device', video_device, f'--set-ctrl={control}={value}']
                     result = subprocess.run(
-                        ['v4l2-ctl', '--device', video_device, f'--set-ctrl={control}={value}'],
-                        capture_output=True, timeout=2
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=2
                     )
-                    results[control] = "success" if result.returncode == 0 else "failed"
+                    
+                    if result.returncode == 0:
+                        results[control] = "success"
+                    else:
+                        results[control] = "failed"
+                        error_msg = result.stderr.strip() if result.stderr else "Unknown error"
+                        errors.append(f"{control}: {error_msg}")
+                        print(f"Error setting {control}={value}: {error_msg}")
+            
+            if errors:
+                print(f"Camera control errors: {errors}")
             
             return jsonify({
-                "success": True,
-                "results": results
+                "success": len(errors) == 0,
+                "results": results,
+                "errors": errors if errors else None
             })
         except Exception as e:
+            print(f"Exception in camera controls: {str(e)}")
             return jsonify({"error": str(e)}), 500
 
 @app.route('/api/sessions/<session_id>/video/stream')

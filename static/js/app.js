@@ -459,6 +459,8 @@ async function loadCameraSettings() {
         const response = await fetch('/api/camera/controls');
         const data = await response.json();
         
+        console.log('Camera controls loaded:', data);
+        
         if (data.controls) {
             // Show camera controls section
             const controlsSection = document.getElementById('cameraControlsSection');
@@ -493,6 +495,8 @@ async function loadCameraSettings() {
                 document.getElementById('autoExposureCheckbox').checked = isAuto;
                 document.getElementById('manualExposureGroup').style.display = isAuto ? 'none' : 'block';
             }
+        } else if (data.error) {
+            console.error('Camera controls error:', data.error);
         }
     } catch (error) {
         console.error('Error loading camera settings:', error);
@@ -519,6 +523,8 @@ async function applyCameraSettings() {
         settings.exposure_absolute = parseInt(document.getElementById('exposureSlider').value);
     }
     
+    console.log('Applying camera settings:', settings);
+    
     try {
         const response = await fetch('/api/camera/controls', {
             method: 'POST',
@@ -529,6 +535,7 @@ async function applyCameraSettings() {
         });
         
         const data = await response.json();
+        console.log('Camera settings response:', data);
         
         if (data.success) {
             // Show success message
@@ -541,12 +548,17 @@ async function applyCameraSettings() {
                 btn.textContent = originalText;
                 btn.style.background = '';
             }, 2000);
+            
+            // Reload current settings to verify
+            setTimeout(loadCameraSettings, 500);
         } else {
-            alert('Error applying settings: ' + (data.error || 'Unknown error'));
+            const errorMsg = data.errors ? data.errors.join(', ') : (data.error || 'Unknown error');
+            alert('Error applying settings: ' + errorMsg);
+            console.error('Camera settings error:', data);
         }
     } catch (error) {
         console.error('Error applying camera settings:', error);
-        alert('Error applying camera settings');
+        alert('Error applying camera settings: ' + error.message);
     }
 }
 
