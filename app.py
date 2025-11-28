@@ -59,12 +59,31 @@ def save_config(config):
     with open(CONFIG_FILE, 'w') as f:
         json.dump(config, f, indent=2)
 
-def detect_usb_camera_devices():
+# Global cache for detected devices
+_device_cache = {
+    'devices': None,
+    'timestamp': 0,
+    'cache_duration': 60  # Cache for 60 seconds
+}
+
+def detect_usb_camera_devices(force_refresh=False):
     """Detect all available USB camera devices that can actually capture
+    
+    Args:
+        force_refresh: If True, ignore cache and re-scan devices
     
     Returns:
         list: List of dicts with device info: [{'device': '/dev/video0', 'name': 'Logitech Webcam'}]
     """
+    import time
+    
+    # Check cache
+    cache_age = time.time() - _device_cache['timestamp']
+    if not force_refresh and _device_cache['devices'] is not None and cache_age < _device_cache['cache_duration']:
+        print(f"[Device Detection] Using cached devices (age: {cache_age:.1f}s)")
+        return _device_cache['devices']
+    
+    print("[Device Detection] Scanning for cameras...")
     devices = []
     video_devices = sorted(Path('/dev').glob('video*'))
     
@@ -113,6 +132,11 @@ def detect_usb_camera_devices():
             print(f"[Device Detection] Error checking {device}: {e}")
             continue
     
+    # Update cache
+    _device_cache['devices'] = devices
+    _device_cache['timestamp'] = time.time()
+    
+    print(f"[Device Detection] Scan complete. Found {len(devices)} working camera(s)")
     return devices
 
 def get_default_camera_device():
@@ -132,8 +156,11 @@ def get_default_camera_device():
     return '/dev/video0'  # Fallback
 
 def detect_camera():
-    """Detect camera type (preserved for backward compatibility)"""
-    devices = detect_usb_camera_devices()
+    """Detect camera type (preserved for backward compatibility)
+    
+    Uses cached device detection results to avoid repeated scanning.
+    """
+    devices = detect_usb_camera_devices(force_refresh=False)  # Use cache
     if devices:
         return 'usb'
     
@@ -1146,6 +1173,13 @@ def cancel_shutdown():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
+    # Perform initial device detection on startup to populate cache
+    print("=" * 60)
+    print("TimelapsePI Starting...")
+    print("=" * 60)
+    detect_usb_camera_devices(force_refresh=True)
+    print("=" * 60)
+    
     app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
 
 @app.route('/api/camera/test')
@@ -1208,7 +1242,8 @@ def test_camera():
 def get_camera_devices():
     """Get list of available camera devices"""
     try:
-        devices = detect_usb_camera_devices()
+        # Use cached results (force refresh only on first call per minute)
+        devices = detect_usb_camera_devices(force_refresh=False)
         config = load_config()
         current_device = config.get('camera_device', get_default_camera_device())
         
@@ -1229,8 +1264,8 @@ def set_camera_device():
         if not device:
             return jsonify({"error": "No device specified"}), 400
         
-        # Verify device exists and works
-        devices = detect_usb_camera_devices()
+        # Verify device exists and works (use cache)
+        devices = detect_usb_camera_devices(force_refresh=False)
         device_valid = any(d['device'] == device for d in devices)
         
         if not device_valid:
@@ -1246,6 +1281,21 @@ def set_camera_device():
         return jsonify({
             "success": True,
             "device": device
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/camera/devices/refresh', methods=['POST'])
+def refresh_camera_devices():
+    """Force refresh the camera device list"""
+    try:
+        devices = detect_usb_camera_devices(force_refresh=True)
+        config = load_config()
+        current_device = config.get('camera_device', get_default_camera_device())
+        
+        return jsonify({
+            "devices": devices,
+            "current_device": current_device
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
