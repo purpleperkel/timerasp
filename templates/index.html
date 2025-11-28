@@ -47,10 +47,35 @@
                     </select>
                 </div>
 
+                <div class="control-group">
+                    <label>
+                        <input type="checkbox" id="scheduleCheckbox">
+                        Schedule start/end times
+                    </label>
+                </div>
+
+                <div id="scheduleControls" style="display: none;">
+                    <div class="control-group">
+                        <label for="startDateTime">Start Time (optional):</label>
+                        <input type="datetime-local" id="startDateTime">
+                        <small style="color: #666;">Leave blank to start immediately</small>
+                    </div>
+
+                    <div class="control-group">
+                        <label for="endDateTime">End Time (optional):</label>
+                        <input type="datetime-local" id="endDateTime">
+                        <small style="color: #666;">Leave blank for manual stop</small>
+                    </div>
+                </div>
+
                 <div class="stats-panel" id="statsPanel" style="display: none;">
                     <div class="stat">
                         <span class="stat-label">Session:</span>
                         <span class="stat-value" id="sessionId">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Status:</span>
+                        <span class="stat-value" id="recordingStatus">Recording</span>
                     </div>
                     <div class="stat">
                         <span class="stat-label">Frames Captured:</span>
@@ -64,11 +89,16 @@
                         <span class="stat-label">Est. Video Length:</span>
                         <span class="stat-value" id="videoLength">0s @ 30fps</span>
                     </div>
+                    <div class="stat" id="scheduledEndStat" style="display: none;">
+                        <span class="stat-label">Ends At:</span>
+                        <span class="stat-value" id="scheduledEndTime">-</span>
+                    </div>
                 </div>
 
                 <div class="button-group">
                     <button id="startBtn" class="btn btn-primary">Start Timelapse</button>
                     <button id="stopBtn" class="btn btn-danger" style="display: none;">Stop Timelapse</button>
+                    <button id="previewCurrentBtn" class="btn btn-secondary" style="display: none;">👁️ Preview Current</button>
                 </div>
             </section>
 

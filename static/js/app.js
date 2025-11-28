@@ -24,10 +24,23 @@ document.addEventListener('DOMContentLoaded', () => {
 function initializeUI() {
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
+    const previewCurrentBtn = document.getElementById('previewCurrentBtn');
     const intervalInput = document.getElementById('intervalInput');
+    const scheduleCheckbox = document.getElementById('scheduleCheckbox');
+    const scheduleControls = document.getElementById('scheduleControls');
     
     startBtn.addEventListener('click', startTimelapse);
     stopBtn.addEventListener('click', stopTimelapse);
+    
+    if (previewCurrentBtn) {
+        previewCurrentBtn.addEventListener('click', previewCurrentSession);
+    }
+    
+    if (scheduleCheckbox) {
+        scheduleCheckbox.addEventListener('change', (e) => {
+            scheduleControls.style.display = e.target.checked ? 'block' : 'none';
+        });
+    }
     
     // Handle camera preview errors
     const cameraPreview = document.getElementById('cameraPreview');
@@ -122,9 +135,13 @@ function updateUI(status) {
     const statusText = document.getElementById('statusText');
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
+    const previewCurrentBtn = document.getElementById('previewCurrentBtn');
     const statsPanel = document.getElementById('statsPanel');
     const intervalInput = document.getElementById('intervalInput');
     const cameraControlsSection = document.getElementById('cameraControlsSection');
+    const recordingStatus = document.getElementById('recordingStatus');
+    const scheduledEndStat = document.getElementById('scheduledEndStat');
+    const scheduledEndTime = document.getElementById('scheduledEndTime');
     
     // Show camera controls only for USB cameras
     if (status.camera_type === 'usb' && cameraControlsSection) {
@@ -134,11 +151,20 @@ function updateUI(status) {
     }
     
     if (status.active) {
-        // Timelapse is running
+        // Timelapse is running or waiting
         statusBadge.classList.add('active');
-        statusText.textContent = 'Recording';
+        
+        if (status.waiting_for_start) {
+            statusText.textContent = 'Waiting to Start';
+            recordingStatus.textContent = 'Waiting...';
+        } else {
+            statusText.textContent = 'Recording';
+            recordingStatus.textContent = 'Recording';
+        }
+        
         startBtn.style.display = 'none';
         stopBtn.style.display = 'block';
+        previewCurrentBtn.style.display = status.total_frames >= 2 ? 'block' : 'none';
         statsPanel.style.display = 'grid';
         intervalInput.disabled = true;
         
@@ -146,12 +172,28 @@ function updateUI(status) {
         document.getElementById('sessionId').textContent = status.session_id || '-';
         document.getElementById('frameCount').textContent = status.total_frames || 0;
         
+        // Show scheduled end time if set
+        if (status.scheduled_end) {
+            scheduledEndStat.style.display = 'block';
+            const endTime = new Date(status.scheduled_end);
+            scheduledEndTime.textContent = endTime.toLocaleString();
+        } else {
+            scheduledEndStat.style.display = 'none';
+        }
+        
         // Calculate duration
-        if (status.start_time) {
+        if (status.start_time && !status.waiting_for_start) {
             const start = new Date(status.start_time);
             const now = new Date();
             const duration = Math.floor((now - start) / 1000);
             document.getElementById('duration').textContent = formatDuration(duration);
+        } else if (status.waiting_for_start && status.scheduled_start) {
+            const start = new Date(status.scheduled_start);
+            const now = new Date();
+            const timeUntil = Math.floor((start - now) / 1000);
+            document.getElementById('duration').textContent = `Starts in ${formatDuration(timeUntil)}`;
+        } else {
+            document.getElementById('duration').textContent = '00:00:00';
         }
         
         // Calculate estimated video length at 30fps
@@ -165,6 +207,7 @@ function updateUI(status) {
         statusText.textContent = status.camera_available ? `Ready (${cameraTypeText})` : 'No Camera';
         startBtn.style.display = 'block';
         stopBtn.style.display = 'none';
+        previewCurrentBtn.style.display = 'none';
         statsPanel.style.display = 'none';
         intervalInput.disabled = false;
         
@@ -175,6 +218,9 @@ function updateUI(status) {
 async function startTimelapse() {
     const intervalInput = document.getElementById('intervalInput');
     const resolutionSelect = document.getElementById('resolutionSelect');
+    const scheduleCheckbox = document.getElementById('scheduleCheckbox');
+    const startDateTime = document.getElementById('startDateTime');
+    const endDateTime = document.getElementById('endDateTime');
     
     const interval = parseInt(intervalInput.value);
     const [width, height] = resolutionSelect.value.split(',').map(Number);
@@ -184,22 +230,48 @@ async function startTimelapse() {
         return;
     }
     
+    const requestData = {
+        interval: interval,
+        resolution: [width, height]
+    };
+    
+    // Add scheduled times if checkbox is checked
+    if (scheduleCheckbox.checked) {
+        if (startDateTime.value) {
+            requestData.scheduled_start = new Date(startDateTime.value).toISOString();
+        }
+        if (endDateTime.value) {
+            requestData.scheduled_end = new Date(endDateTime.value).toISOString();
+            
+            // Validate end is after start
+            const start = startDateTime.value ? new Date(startDateTime.value) : new Date();
+            const end = new Date(endDateTime.value);
+            
+            if (end <= start) {
+                alert('End time must be after start time');
+                return;
+            }
+        }
+    }
+    
     try {
         const response = await fetch('/api/start', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                interval: interval,
-                resolution: [width, height]
-            })
+            body: JSON.stringify(requestData)
         });
         
         const data = await response.json();
         
         if (data.success) {
             currentState.startTime = new Date();
+            
+            if (data.scheduled_start) {
+                alert(`Timelapse scheduled to start at ${new Date(data.scheduled_start).toLocaleString()}`);
+            }
+            
             await checkStatus();
         } else {
             alert('Error starting timelapse: ' + (data.error || 'Unknown error'));
@@ -645,5 +717,54 @@ async function shutdownSystem() {
     } catch (error) {
         console.error('Error shutting down:', error);
         alert('❌ Error shutting down system');
+    }
+}
+
+async function previewCurrentSession() {
+    const btn = document.getElementById('previewCurrentBtn');
+    const originalText = btn.textContent;
+    
+    btn.textContent = '⏳ Generating...';
+    btn.disabled = true;
+    
+    try {
+        const response = await fetch('/api/current-session/preview', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ fps: 30 })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            // Open preview modal with current session video
+            const modal = document.getElementById('videoModal');
+            const video = document.getElementById('videoPlayer');
+            const source = document.getElementById('videoSource');
+            const title = document.getElementById('videoModalTitle');
+            const downloadBtn = document.getElementById('downloadFromPreview');
+            
+            source.src = '/api/current-session/preview/video';
+            video.load();
+            
+            title.textContent = 'Current Session Preview';
+            downloadBtn.style.display = 'none'; // Can't download preview
+            
+            modal.style.display = 'flex';
+            
+            btn.textContent = originalText;
+            btn.disabled = false;
+        } else {
+            alert('Error generating preview: ' + (data.error || 'Unknown error'));
+            btn.textContent = originalText;
+            btn.disabled = false;
+        }
+    } catch (error) {
+        console.error('Error previewing current session:', error);
+        alert('Error generating preview');
+        btn.textContent = originalText;
+        btn.disabled = false;
     }
 }

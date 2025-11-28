@@ -35,7 +35,10 @@ timelapse_state = {
     "interval": 5,  # seconds
     "total_frames": 0,
     "start_time": None,
-    "thread": None
+    "scheduled_start": None,  # ISO datetime string
+    "scheduled_end": None,    # ISO datetime string
+    "thread": None,
+    "waiting_for_start": False
 }
 
 camera_lock = threading.Lock()
@@ -127,11 +130,33 @@ def capture_image(session_id, frame_number, resolution=(1920, 1080)):
     
     return filename.exists()
 
-def timelapse_worker(session_id, interval, resolution):
+def timelapse_worker(session_id, interval, resolution, scheduled_start=None, scheduled_end=None):
     """Background worker for capturing timelapse frames"""
     frame_number = 0
     
+    # Wait for scheduled start if specified
+    if scheduled_start:
+        timelapse_state["waiting_for_start"] = True
+        start_dt = datetime.fromisoformat(scheduled_start.replace('Z', '+00:00'))
+        
+        while datetime.now(start_dt.tzinfo or None) < start_dt:
+            if not timelapse_state["active"]:
+                timelapse_state["waiting_for_start"] = False
+                return
+            time.sleep(1)
+        
+        timelapse_state["waiting_for_start"] = False
+        timelapse_state["start_time"] = datetime.now().isoformat()
+    
     while timelapse_state["active"]:
+        # Check if we've reached scheduled end time
+        if scheduled_end:
+            end_dt = datetime.fromisoformat(scheduled_end.replace('Z', '+00:00'))
+            if datetime.now(end_dt.tzinfo or None) >= end_dt:
+                print(f"Reached scheduled end time, stopping timelapse")
+                timelapse_state["active"] = False
+                break
+        
         try:
             with camera_lock:
                 success = capture_image(session_id, frame_number, resolution)
@@ -231,6 +256,9 @@ def get_status():
         "interval": timelapse_state["interval"],
         "total_frames": timelapse_state["total_frames"],
         "start_time": timelapse_state["start_time"],
+        "scheduled_start": timelapse_state.get("scheduled_start"),
+        "scheduled_end": timelapse_state.get("scheduled_end"),
+        "waiting_for_start": timelapse_state.get("waiting_for_start", False),
         "camera_available": detect_camera() is not None,
         "camera_type": detect_camera()
     })
@@ -244,6 +272,8 @@ def start_timelapse():
     data = request.json or {}
     interval = data.get('interval', 5)
     resolution = data.get('resolution', [1920, 1080])
+    scheduled_start = data.get('scheduled_start')  # ISO datetime string
+    scheduled_end = data.get('scheduled_end')      # ISO datetime string
     
     # Create new session
     session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -253,12 +283,18 @@ def start_timelapse():
     timelapse_state["current_session"] = session_id
     timelapse_state["interval"] = interval
     timelapse_state["total_frames"] = 0
-    timelapse_state["start_time"] = datetime.now().isoformat()
+    timelapse_state["scheduled_start"] = scheduled_start
+    timelapse_state["scheduled_end"] = scheduled_end
+    
+    if not scheduled_start:
+        timelapse_state["start_time"] = datetime.now().isoformat()
+    else:
+        timelapse_state["start_time"] = None  # Will be set when actually starts
     
     # Start worker thread
     thread = threading.Thread(
         target=timelapse_worker,
-        args=(session_id, interval, resolution),
+        args=(session_id, interval, resolution, scheduled_start, scheduled_end),
         daemon=True
     )
     thread.start()
@@ -267,7 +303,9 @@ def start_timelapse():
     return jsonify({
         "success": True,
         "session_id": session_id,
-        "interval": interval
+        "interval": interval,
+        "scheduled_start": scheduled_start,
+        "scheduled_end": scheduled_end
     })
 
 @app.route('/api/stop', methods=['POST'])
@@ -535,6 +573,70 @@ def stream_video(session_id):
         return jsonify({"error": "Video not found"}), 404
     
     return send_file(video_file, mimetype='video/mp4')
+
+@app.route('/api/current-session/preview', methods=['POST'])
+def preview_current_session():
+    """Generate a preview video of the current recording session"""
+    if not timelapse_state["active"] and not timelapse_state["current_session"]:
+        return jsonify({"error": "No active session"}), 400
+    
+    session_id = timelapse_state["current_session"]
+    data = request.json or {}
+    fps = data.get('fps', 30)
+    
+    session_dir = IMAGES_DIR / session_id
+    if not session_dir.exists():
+        return jsonify({"error": "Session directory not found"}), 404
+    
+    # Count current frames
+    images = sorted(session_dir.glob("frame_*.jpg"))
+    if len(images) < 2:
+        return jsonify({"error": "Not enough frames yet (need at least 2)"}), 400
+    
+    # Generate preview video
+    preview_file = VIDEOS_DIR / f"{session_id}_preview.mp4"
+    
+    try:
+        cmd = [
+            'ffmpeg',
+            '-y',  # Overwrite
+            '-framerate', str(fps),
+            '-pattern_type', 'glob',
+            '-i', str(session_dir / 'frame_*.jpg'),
+            '-c:v', 'libx264',
+            '-pix_fmt', 'yuv420p',
+            '-crf', '23',
+            str(preview_file)
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, timeout=60)
+        
+        if result.returncode == 0 and preview_file.exists():
+            return jsonify({
+                "success": True,
+                "preview_url": f"/api/current-session/preview/video",
+                "frame_count": len(images)
+            })
+        else:
+            return jsonify({"error": "Failed to generate preview"}), 500
+            
+    except subprocess.TimeoutExpired:
+        return jsonify({"error": "Preview generation timed out"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/current-session/preview/video')
+def stream_current_preview():
+    """Stream the current session preview video"""
+    if not timelapse_state["current_session"]:
+        return jsonify({"error": "No active session"}), 404
+    
+    preview_file = VIDEOS_DIR / f"{timelapse_state['current_session']}_preview.mp4"
+    
+    if not preview_file.exists():
+        return jsonify({"error": "Preview not generated yet"}), 404
+    
+    return send_file(preview_file, mimetype='video/mp4')
 
 @app.route('/api/system/shutdown', methods=['POST'])
 def shutdown_system():
