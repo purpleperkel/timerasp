@@ -172,7 +172,7 @@ def timelapse_worker(session_id, interval, resolution, scheduled_start=None, sch
             print(f"Error capturing frame: {e}")
             time.sleep(1)
 
-def compile_video(session_id, fps=30):
+def compile_video(session_id, fps=30, rotation=0):
     """Compile images into a video using ffmpeg"""
     session_dir = IMAGES_DIR / session_id
     output_file = VIDEOS_DIR / f"{session_id}.mp4"
@@ -182,18 +182,30 @@ def compile_video(session_id, fps=30):
     if not images:
         return None
     
-    # Use ffmpeg to create video
+    # Build ffmpeg command with rotation
     cmd = [
         'ffmpeg',
         '-y',  # Overwrite output file
         '-framerate', str(fps),
         '-pattern_type', 'glob',
         '-i', str(session_dir / 'frame_*.jpg'),
+    ]
+    
+    # Add rotation filter if specified
+    # 0 = no rotation, 90 = 90° clockwise, 180 = 180°, 270 = 90° counter-clockwise
+    if rotation == 90:
+        cmd.extend(['-vf', 'transpose=1'])  # 90° clockwise
+    elif rotation == 180:
+        cmd.extend(['-vf', 'transpose=1,transpose=1'])  # 180°
+    elif rotation == 270:
+        cmd.extend(['-vf', 'transpose=2'])  # 90° counter-clockwise
+    
+    cmd.extend([
         '-c:v', 'libx264',
         '-pix_fmt', 'yuv420p',
         '-crf', '23',
         str(output_file)
-    ]
+    ])
     
     try:
         subprocess.run(cmd, check=True, capture_output=True)
@@ -336,6 +348,7 @@ def compile_timelapse():
     data = request.json or {}
     session_id = data.get('session_id')
     fps = data.get('fps', 30)
+    rotation = data.get('rotation', 0)  # 0, 90, 180, 270
     
     if not session_id:
         return jsonify({"error": "session_id required"}), 400
@@ -346,7 +359,7 @@ def compile_timelapse():
     
     # Compile in background to avoid blocking
     def compile_async():
-        compile_video(session_id, fps)
+        compile_video(session_id, fps, rotation)
     
     thread = threading.Thread(target=compile_async, daemon=True)
     thread.start()
@@ -432,11 +445,57 @@ def download_video(session_id):
     
     return send_file(video_file, mimetype='video/mp4', as_attachment=True)
 
+@app.route('/api/sessions/<session_id>/rotate', methods=['POST'])
+def rotate_video(session_id):
+    """Rotate an existing video"""
+    data = request.json or {}
+    rotation = data.get('rotation', 90)  # Default 90° clockwise
+    
+    video_file = VIDEOS_DIR / f"{session_id}.mp4"
+    
+    if not video_file.exists():
+        return jsonify({"error": "Video not found"}), 404
+    
+    # Create rotated filename
+    rotated_file = VIDEOS_DIR / f"{session_id}_rotated.mp4"
+    
+    # Build ffmpeg command
+    cmd = ['ffmpeg', '-y', '-i', str(video_file)]
+    
+    if rotation == 90:
+        cmd.extend(['-vf', 'transpose=1'])  # 90° clockwise
+    elif rotation == 180:
+        cmd.extend(['-vf', 'transpose=1,transpose=1'])  # 180°
+    elif rotation == 270:
+        cmd.extend(['-vf', 'transpose=2'])  # 90° counter-clockwise
+    else:
+        return jsonify({"error": "Invalid rotation. Use 90, 180, or 270"}), 400
+    
+    cmd.extend(['-c:a', 'copy', str(rotated_file)])
+    
+    try:
+        # Run rotation in background
+        def rotate_async():
+            subprocess.run(cmd, check=True, capture_output=True, timeout=300)
+            # Replace original with rotated
+            rotated_file.replace(video_file)
+        
+        thread = threading.Thread(target=rotate_async, daemon=True)
+        thread.start()
+        
+        return jsonify({
+            "success": True,
+            "message": f"Rotating video {rotation}°..."
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/sessions/<session_id>', methods=['DELETE'])
 def delete_session(session_id):
     """Delete a session and its files"""
     session_dir = IMAGES_DIR / session_id
     video_file = VIDEOS_DIR / f"{session_id}.mp4"
+    preview_file = VIDEOS_DIR / f"{session_id}_preview.mp4"
     
     # Delete images
     if session_dir.exists():
@@ -446,6 +505,10 @@ def delete_session(session_id):
     # Delete video
     if video_file.exists():
         video_file.unlink()
+    
+    # Delete preview if exists
+    if preview_file.exists():
+        preview_file.unlink()
     
     return jsonify({"success": True})
 

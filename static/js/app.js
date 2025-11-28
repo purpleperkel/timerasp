@@ -348,6 +348,9 @@ async function loadSessions() {
                         <button class="btn btn-primary" onclick="downloadVideo('${session.id}')">
                             ⬇️ Download
                         </button>
+                        <button class="btn btn-secondary" onclick="rotateVideo('${session.id}')">
+                            🔄 Rotate
+                        </button>
                     `}
                     <button class="btn btn-danger" onclick="deleteSession('${session.id}')">
                         🗑️ Delete
@@ -363,8 +366,18 @@ async function loadSessions() {
 }
 
 async function compileVideo(sessionId) {
+    // Create a custom dialog for compilation options
     const fps = prompt('Enter frame rate for video (default: 30fps):', '30');
     if (!fps) return;
+    
+    const rotation = prompt('Rotate video? Enter 0 (none), 90 (clockwise), 180, or 270 (counter-clockwise):', '0');
+    if (rotation === null) return;
+    
+    const rotationValue = parseInt(rotation);
+    if (![0, 90, 180, 270].includes(rotationValue)) {
+        alert('Invalid rotation. Please use 0, 90, 180, or 270');
+        return;
+    }
     
     try {
         const response = await fetch('/api/compile', {
@@ -374,7 +387,8 @@ async function compileVideo(sessionId) {
             },
             body: JSON.stringify({
                 session_id: sessionId,
-                fps: parseInt(fps)
+                fps: parseInt(fps),
+                rotation: rotationValue
             })
         });
         
@@ -766,5 +780,45 @@ async function previewCurrentSession() {
         alert('Error generating preview');
         btn.textContent = originalText;
         btn.disabled = false;
+    }
+}
+
+async function rotateVideo(sessionId) {
+    const rotation = prompt('Rotate video:\n0 = No rotation\n90 = 90° clockwise\n180 = 180°\n270 = 90° counter-clockwise', '90');
+    
+    if (rotation === null) return;
+    
+    const rotationValue = parseInt(rotation);
+    if (![90, 180, 270].includes(rotationValue)) {
+        alert('Invalid rotation. Please use 90, 180, or 270');
+        return;
+    }
+    
+    if (!confirm(`Rotate video ${rotationValue}°? This will replace the original video.`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/sessions/${sessionId}/rotate`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                rotation: rotationValue
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            alert('Video rotation started! This may take a minute. Refresh to see the result.');
+            setTimeout(loadSessions, 3000);
+        } else {
+            alert('Error rotating video: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error rotating video:', error);
+        alert('Error rotating video');
     }
 }
