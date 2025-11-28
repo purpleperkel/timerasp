@@ -10,21 +10,43 @@ venv/
 dist/
 build/
 
-# Timelapse data
+# Timelapse data - user content
+timelapse_data/
 timelapse_data/images/*
 timelapse_data/videos/*
+!timelapse_data/.gitkeep
 !timelapse_data/images/.gitkeep
 !timelapse_data/videos/.gitkeep
 
-# Configuration
+# Configuration - user settings
+config/
 config/settings.json
+!config/.gitkeep
+
+# Backup files
+*_backup/
+timelapsepi_backup/
+*.backup
+backup/
+
+# Temporary and test files
+*.tmp
+*.temp
+test.jpg
+test.mp4
+preview/
+*.preview
 
 # Logs
 *.log
+logs/
 
-# OS
+# OS files
 .DS_Store
 Thumbs.db
+*.swp
+*.swo
+*~
 
 # IDE
 .vscode/
@@ -32,3 +54,24 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# System service files (installed to /etc/)
+# Keep in repo but ignore if copied here
+/etc/
+
+# User-specific scripts
+run_app.sh
+timelapsepi-venv.service
+
+# Virtual environment
+venv/
+env/
+ENV/
+
+# Installation artifacts
+*.deb
+*.rpm
+
+# Compiled assets
+*.pyc
+*.pyo

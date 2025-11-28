@@ -1,0 +1,64 @@
+# Git
+.git/
+.gitignore
+.gitattributes
+GIT_SETUP.md
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# User data
+timelapse_data/images/*
+timelapse_data/videos/*
+config/settings.json
+
+# Backup files
+*_backup/
+*.backup
+backup/
+
+# Test files
+test.jpg
+test.mp4
+*.test
+*.tmp
+*.temp
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Documentation (optional - comment out if you want docs in image)
+# README.md
+# *.md
+
+# Service files (don't need in container)
+*.service
+*.avahi-service
+install*.sh
+fix_*.sh
+test_run.sh

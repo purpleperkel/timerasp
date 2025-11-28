@@ -324,17 +324,29 @@ def list_sessions():
     """List all timelapse sessions"""
     sessions = []
     
-    for session_dir in sorted(IMAGES_DIR.iterdir(), reverse=True):
-        if session_dir.is_dir():
-            images = list(session_dir.glob("frame_*.jpg"))
-            video_file = VIDEOS_DIR / f"{session_dir.name}.mp4"
-            
-            sessions.append({
-                "id": session_dir.name,
-                "frame_count": len(images),
-                "has_video": video_file.exists(),
-                "created": datetime.strptime(session_dir.name, "%Y%m%d_%H%M%S").isoformat()
-            })
+    # Ensure directory exists
+    IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    
+    try:
+        for session_dir in sorted(IMAGES_DIR.iterdir(), reverse=True):
+            if session_dir.is_dir() and not session_dir.name.startswith('.'):
+                images = list(session_dir.glob("frame_*.jpg"))
+                video_file = VIDEOS_DIR / f"{session_dir.name}.mp4"
+                
+                try:
+                    created_time = datetime.strptime(session_dir.name, "%Y%m%d_%H%M%S").isoformat()
+                except:
+                    # If directory name doesn't match expected format, use current time
+                    created_time = datetime.now().isoformat()
+                
+                sessions.append({
+                    "id": session_dir.name,
+                    "frame_count": len(images),
+                    "has_video": video_file.exists(),
+                    "created": created_time
+                })
+    except Exception as e:
+        print(f"Error listing sessions: {e}")
     
     return jsonify({"sessions": sessions})
 
@@ -416,6 +428,84 @@ def handle_config():
         config = request.json
         save_config(config)
         return jsonify({"success": True})
+
+@app.route('/api/camera/controls', methods=['GET', 'POST'])
+def camera_controls():
+    """Get or set camera controls (USB camera only)"""
+    camera_type = detect_camera()
+    
+    if camera_type != 'usb':
+        return jsonify({"error": "Camera controls only available for USB cameras"}), 400
+    
+    # Find video device
+    video_device = '/dev/video0'
+    video_devices = list(Path('/dev').glob('video*'))
+    for device in video_devices:
+        try:
+            result = subprocess.run(['v4l2-ctl', '--device', str(device), '--all'], 
+                                  capture_output=True, timeout=1)
+            if b'Video Capture' in result.stdout:
+                video_device = str(device)
+                break
+        except:
+            pass
+    
+    if request.method == 'GET':
+        # Get current controls
+        try:
+            result = subprocess.run(['v4l2-ctl', '--device', video_device, '--list-ctrls'],
+                                  capture_output=True, text=True, timeout=2)
+            
+            controls = {}
+            for line in result.stdout.split('\n'):
+                if 'brightness' in line.lower():
+                    # Parse: brightness 0x00980900 (int) : min=0 max=255 step=1 default=128 value=128
+                    parts = line.split('value=')
+                    if len(parts) > 1:
+                        controls['brightness'] = int(parts[1].split()[0])
+                elif 'contrast' in line.lower() and 'auto' not in line.lower():
+                    parts = line.split('value=')
+                    if len(parts) > 1:
+                        controls['contrast'] = int(parts[1].split()[0])
+                elif 'saturation' in line.lower():
+                    parts = line.split('value=')
+                    if len(parts) > 1:
+                        controls['saturation'] = int(parts[1].split()[0])
+                elif 'exposure_auto ' in line.lower():
+                    parts = line.split('value=')
+                    if len(parts) > 1:
+                        controls['exposure_auto'] = int(parts[1].split()[0])
+                elif 'exposure_absolute' in line.lower():
+                    parts = line.split('value=')
+                    if len(parts) > 1:
+                        controls['exposure_absolute'] = int(parts[1].split()[0])
+            
+            return jsonify({
+                "device": video_device,
+                "controls": controls
+            })
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    
+    else:  # POST - set controls
+        data = request.json
+        
+        try:
+            results = {}
+            for control, value in data.items():
+                if control in ['brightness', 'contrast', 'saturation', 'exposure_auto', 'exposure_absolute']:
+                    result = subprocess.run(
+                        ['v4l2-ctl', '--device', video_device, f'--set-ctrl={control}={value}'],
+                        capture_output=True, timeout=2
+                    )
+                    results[control] = "success" if result.returncode == 0 else "failed"
+            
+            return jsonify({
+                "success": True,
+                "results": results
+            })
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)

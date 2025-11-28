@@ -12,6 +12,7 @@ let updateInterval = null;
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
     initializeUI();
+    initializeCameraControls();
     checkStatus();
     loadSessions();
     
@@ -43,6 +44,64 @@ function initializeUI() {
     });
 }
 
+function initializeCameraControls() {
+    const brightnessSlider = document.getElementById('brightnessSlider');
+    const contrastSlider = document.getElementById('contrastSlider');
+    const saturationSlider = document.getElementById('saturationSlider');
+    const exposureSlider = document.getElementById('exposureSlider');
+    const autoExposureCheckbox = document.getElementById('autoExposureCheckbox');
+    const applySettingsBtn = document.getElementById('applyCameraSettings');
+    const loadSettingsBtn = document.getElementById('loadCameraSettings');
+    const manualExposureGroup = document.getElementById('manualExposureGroup');
+    
+    // Update value displays
+    if (brightnessSlider) {
+        brightnessSlider.addEventListener('input', (e) => {
+            document.getElementById('brightnessValue').textContent = e.target.value;
+        });
+    }
+    
+    if (contrastSlider) {
+        contrastSlider.addEventListener('input', (e) => {
+            document.getElementById('contrastValue').textContent = e.target.value;
+        });
+    }
+    
+    if (saturationSlider) {
+        saturationSlider.addEventListener('input', (e) => {
+            document.getElementById('saturationValue').textContent = e.target.value;
+        });
+    }
+    
+    if (exposureSlider) {
+        exposureSlider.addEventListener('input', (e) => {
+            document.getElementById('exposureValue').textContent = e.target.value;
+        });
+    }
+    
+    // Toggle manual exposure
+    if (autoExposureCheckbox) {
+        autoExposureCheckbox.addEventListener('change', (e) => {
+            if (manualExposureGroup) {
+                manualExposureGroup.style.display = e.target.checked ? 'none' : 'block';
+            }
+        });
+    }
+    
+    // Apply settings
+    if (applySettingsBtn) {
+        applySettingsBtn.addEventListener('click', applyCameraSettings);
+    }
+    
+    // Load current settings
+    if (loadSettingsBtn) {
+        loadSettingsBtn.addEventListener('click', loadCameraSettings);
+    }
+    
+    // Load settings on startup
+    loadCameraSettings();
+}
+
 async function checkStatus() {
     try {
         const response = await fetch('/api/status');
@@ -65,6 +124,14 @@ function updateUI(status) {
     const stopBtn = document.getElementById('stopBtn');
     const statsPanel = document.getElementById('statsPanel');
     const intervalInput = document.getElementById('intervalInput');
+    const cameraControlsSection = document.getElementById('cameraControlsSection');
+    
+    // Show camera controls only for USB cameras
+    if (status.camera_type === 'usb' && cameraControlsSection) {
+        cameraControlsSection.style.display = 'block';
+    } else if (cameraControlsSection) {
+        cameraControlsSection.style.display = 'none';
+    }
     
     if (status.active) {
         // Timelapse is running
@@ -94,7 +161,8 @@ function updateUI(status) {
     } else {
         // Timelapse is stopped
         statusBadge.classList.remove('active');
-        statusText.textContent = status.camera_available ? 'Ready' : 'No Camera';
+        const cameraTypeText = status.camera_type === 'usb' ? 'USB Camera' : (status.camera_type === 'libcamera' ? 'Pi Camera' : 'No Camera');
+        statusText.textContent = status.camera_available ? `Ready (${cameraTypeText})` : 'No Camera';
         startBtn.style.display = 'block';
         stopBtn.style.display = 'none';
         statsPanel.style.display = 'none';
@@ -289,4 +357,100 @@ function formatDuration(seconds) {
 function formatDate(isoString) {
     const date = new Date(isoString);
     return date.toLocaleString();
+}
+
+async function loadCameraSettings() {
+    try {
+        const response = await fetch('/api/camera/controls');
+        const data = await response.json();
+        
+        if (data.controls) {
+            // Show camera controls section
+            const controlsSection = document.getElementById('cameraControlsSection');
+            if (controlsSection) {
+                controlsSection.style.display = 'block';
+            }
+            
+            // Update sliders with current values
+            if (data.controls.brightness !== undefined) {
+                document.getElementById('brightnessSlider').value = data.controls.brightness;
+                document.getElementById('brightnessValue').textContent = data.controls.brightness;
+            }
+            
+            if (data.controls.contrast !== undefined) {
+                document.getElementById('contrastSlider').value = data.controls.contrast;
+                document.getElementById('contrastValue').textContent = data.controls.contrast;
+            }
+            
+            if (data.controls.saturation !== undefined) {
+                document.getElementById('saturationSlider').value = data.controls.saturation;
+                document.getElementById('saturationValue').textContent = data.controls.saturation;
+            }
+            
+            if (data.controls.exposure_absolute !== undefined) {
+                document.getElementById('exposureSlider').value = data.controls.exposure_absolute;
+                document.getElementById('exposureValue').textContent = data.controls.exposure_absolute;
+            }
+            
+            if (data.controls.exposure_auto !== undefined) {
+                // exposure_auto: 3=auto, 1=manual
+                const isAuto = data.controls.exposure_auto === 3;
+                document.getElementById('autoExposureCheckbox').checked = isAuto;
+                document.getElementById('manualExposureGroup').style.display = isAuto ? 'none' : 'block';
+            }
+        }
+    } catch (error) {
+        console.error('Error loading camera settings:', error);
+        // Hide camera controls if not available
+        const controlsSection = document.getElementById('cameraControlsSection');
+        if (controlsSection) {
+            controlsSection.style.display = 'none';
+        }
+    }
+}
+
+async function applyCameraSettings() {
+    const settings = {
+        brightness: parseInt(document.getElementById('brightnessSlider').value),
+        contrast: parseInt(document.getElementById('contrastSlider').value),
+        saturation: parseInt(document.getElementById('saturationSlider').value)
+    };
+    
+    // Add exposure settings
+    const autoExposure = document.getElementById('autoExposureCheckbox').checked;
+    settings.exposure_auto = autoExposure ? 3 : 1;
+    
+    if (!autoExposure) {
+        settings.exposure_absolute = parseInt(document.getElementById('exposureSlider').value);
+    }
+    
+    try {
+        const response = await fetch('/api/camera/controls', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(settings)
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            // Show success message
+            const btn = document.getElementById('applyCameraSettings');
+            const originalText = btn.textContent;
+            btn.textContent = '✅ Applied!';
+            btn.style.background = '#4caf50';
+            
+            setTimeout(() => {
+                btn.textContent = originalText;
+                btn.style.background = '';
+            }, 2000);
+        } else {
+            alert('Error applying settings: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error applying camera settings:', error);
+        alert('Error applying camera settings');
+    }
 }
