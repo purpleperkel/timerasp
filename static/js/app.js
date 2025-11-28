@@ -255,15 +255,13 @@ async function loadSessions() {
         }
         
         sessionsList.innerHTML = data.sessions.map(session => `
-            <div class="session-item">
-                <img class="session-preview" 
-                     src="/api/sessions/${session.id}/preview" 
-                     alt="Session preview"
-                     onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect fill=%22%23ddd%22 width=%22100%22 height=%22100%22/%3E%3Ctext x=%2250%22 y=%2250%22 text-anchor=%22middle%22 dy=%22.3em%22 fill=%22%23999%22 font-size=%2220%22%3ENo Preview%3C/text%3E%3C/svg%3E'">
+            <div class="session-item-no-preview">
                 <div class="session-info">
                     <h3>Session ${session.id}</h3>
                     <p>📸 Frames: ${session.frame_count}</p>
                     <p>📅 Created: ${formatDate(session.created)}</p>
+                    ${session.has_video && session.duration ? 
+                        `<p>⏱️ Duration: ${formatDuration(Math.round(session.duration))}</p>` : ''}
                     <p>${session.has_video ? '✅ Video compiled' : '⏳ No video yet'}</p>
                 </div>
                 <div class="session-actions">
@@ -350,11 +348,19 @@ async function deleteSession(sessionId) {
 }
 
 function formatDuration(seconds) {
+    if (seconds < 60) {
+        return `${seconds}s`;
+    }
+    
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     const secs = seconds % 60;
     
-    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    if (hours > 0) {
+        return `${hours}h ${minutes}m ${secs}s`;
+    } else {
+        return `${minutes}m ${secs}s`;
+    }
 }
 
 function formatDate(isoString) {

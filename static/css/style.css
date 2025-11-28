@@ -232,6 +232,22 @@ h2 {
     transform: translateX(5px);
 }
 
+.session-item-no-preview {
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 10px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 20px;
+    align-items: center;
+    transition: all 0.3s;
+}
+
+.session-item-no-preview:hover {
+    background: #e9ecef;
+    transform: translateX(5px);
+}
+
 .session-preview {
     width: 150px;
     height: 100px;
@@ -298,6 +314,11 @@ h2 {
     }
 
     .session-item {
+        grid-template-columns: 1fr;
+        text-align: center;
+    }
+
+    .session-item-no-preview {
         grid-template-columns: 1fr;
         text-align: center;
     }

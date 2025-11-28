@@ -339,11 +339,30 @@ def list_sessions():
                     # If directory name doesn't match expected format, use current time
                     created_time = datetime.now().isoformat()
                 
+                # Calculate video duration if video exists
+                duration_seconds = None
+                if video_file.exists():
+                    try:
+                        # Use ffprobe to get video duration
+                        result = subprocess.run(
+                            ['ffprobe', '-v', 'error', '-show_entries', 
+                             'format=duration', '-of', 
+                             'default=noprint_wrappers=1:nokey=1', str(video_file)],
+                            capture_output=True,
+                            text=True,
+                            timeout=5
+                        )
+                        if result.returncode == 0:
+                            duration_seconds = float(result.stdout.strip())
+                    except:
+                        pass
+                
                 sessions.append({
                     "id": session_dir.name,
                     "frame_count": len(images),
                     "has_video": video_file.exists(),
-                    "created": created_time
+                    "created": created_time,
+                    "duration": duration_seconds
                 })
     except Exception as e:
         print(f"Error listing sessions: {e}")
