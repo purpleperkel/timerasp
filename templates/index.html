@@ -68,6 +68,24 @@
                     </div>
                 </div>
 
+                <div class="control-group">
+                    <label>
+                        <input type="checkbox" id="autoAdjustCheckbox">
+                        🔧 Auto-Adjust Settings During Timelapse
+                    </label>
+                    <p class="help-text">Let camera automatically adjust brightness, exposure, contrast, and saturation between frames. Good for changing lighting conditions (sunrise/sunset).</p>
+                </div>
+
+                <div class="control-group">
+                    <label for="irModeSelect">🌙 IR Night Vision Mode:</label>
+                    <select id="irModeSelect">
+                        <option value="auto">Auto (detect darkness)</option>
+                        <option value="off">Always Off</option>
+                        <option value="on">Always On</option>
+                    </select>
+                    <p class="help-text">Auto mode switches to IR when scene brightness drops below threshold.</p>
+                </div>
+
                 <div class="stats-panel" id="statsPanel" style="display: none;">
                     <div class="stat">
                         <span class="stat-label">Session:</span>
@@ -88,6 +106,14 @@
                     <div class="stat">
                         <span class="stat-label">Est. Video Length:</span>
                         <span class="stat-value" id="videoLength">0s @ 30fps</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Auto-Adjust:</span>
+                        <span class="stat-value" id="autoAdjustStatus">Off</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">IR Mode:</span>
+                        <span class="stat-value" id="irModeStatus">Auto</span>
                     </div>
                     <div class="stat" id="scheduledEndStat" style="display: none;">
                         <span class="stat-label">Ends At:</span>

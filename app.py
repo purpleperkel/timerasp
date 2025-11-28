@@ -89,8 +89,16 @@ def detect_camera():
     
     return None
 
-def capture_image(session_id, frame_number, resolution=(1920, 1080)):
-    """Capture a single image"""
+def capture_image(session_id, frame_number, resolution=(1920, 1080), auto_adjust=False, ir_mode='auto'):
+    """Capture a single image with optional auto-adjustment and IR control
+    
+    Args:
+        session_id: Session identifier
+        frame_number: Frame number for filename
+        resolution: Tuple of (width, height)
+        auto_adjust: If True, let camera auto-adjust settings between frames
+        ir_mode: 'on', 'off', or 'auto' (auto-detect based on brightness)
+    """
     session_dir = IMAGES_DIR / session_id
     session_dir.mkdir(exist_ok=True)
     
@@ -99,16 +107,69 @@ def capture_image(session_id, frame_number, resolution=(1920, 1080)):
     camera_type = detect_camera()
     
     if camera_type == 'usb':
-        # Use fswebcam for USB cameras with optimized settings
+        # Find the video device
+        video_device = '/dev/video0'
+        video_devices = list(Path('/dev').glob('video*'))
+        for device in video_devices:
+            try:
+                result = subprocess.run(['v4l2-ctl', '--device', str(device), '--all'], 
+                                      capture_output=True, timeout=1)
+                if b'Video Capture' in result.stdout:
+                    video_device = str(device)
+                    break
+            except:
+                pass
+        
+        # Handle IR mode switching
+        if ir_mode == 'auto':
+            # Check brightness of last frame to decide if IR is needed
+            last_frame = session_dir / f"frame_{frame_number-1:06d}.jpg"
+            if last_frame.exists() and frame_number > 0:
+                try:
+                    # Calculate average brightness using ImageMagick or similar
+                    result = subprocess.run(
+                        ['ffmpeg', '-i', str(last_frame), '-vf', 
+                         'scale=100:100,format=gray,crop=50:50:25:25', 
+                         '-f', 'rawvideo', '-'],
+                        capture_output=True, timeout=2
+                    )
+                    if result.returncode == 0:
+                        # Calculate average brightness from raw data
+                        brightness = sum(result.stdout) / len(result.stdout) if result.stdout else 128
+                        
+                        # If too dark (< 30 out of 255), enable IR
+                        # If bright enough (> 50 out of 255), disable IR
+                        if brightness < 30:
+                            set_ir_mode(video_device, True)
+                        elif brightness > 50:
+                            set_ir_mode(video_device, False)
+                except:
+                    pass
+        elif ir_mode == 'on':
+            set_ir_mode(video_device, True)
+        elif ir_mode == 'off':
+            set_ir_mode(video_device, False)
+        
+        # Build fswebcam command
         cmd = [
             'fswebcam',
+            '-d', video_device,
             '-r', f"{resolution[0]}x{resolution[1]}",
             '--no-banner',
             '--jpeg', '95',  # High quality JPEG
-            '-S', '3',  # Skip 3 frames to let camera adjust
-            '--set', 'brightness=50%',
-            str(filename)
         ]
+        
+        if auto_adjust:
+            # Let camera auto-adjust by skipping frames
+            cmd.extend(['-S', '10'])  # Skip 10 frames for better adjustment
+            # Don't force any settings, let camera auto-adjust
+        else:
+            # Minimal frame skip, use locked settings
+            cmd.extend(['-S', '2'])  # Skip just 2 frames for camera stability
+            # Settings will be locked via v4l2-ctl before timelapse starts
+        
+        cmd.append(str(filename))
+        
         try:
             subprocess.run(cmd, check=True, capture_output=True, timeout=10)
         except subprocess.TimeoutExpired:
@@ -130,8 +191,49 @@ def capture_image(session_id, frame_number, resolution=(1920, 1080)):
     
     return filename.exists()
 
-def timelapse_worker(session_id, interval, resolution, scheduled_start=None, scheduled_end=None):
-    """Background worker for capturing timelapse frames"""
+def set_ir_mode(video_device, enable):
+    """Enable or disable IR mode on compatible cameras
+    
+    Many USB cameras with IR have controls like:
+    - led_mode (for IR LED)
+    - infrared_mode
+    - ir_led
+    """
+    try:
+        # Common IR control names
+        ir_controls = ['led_mode', 'infrared_mode', 'ir_led', 'led1_mode']
+        
+        # Get available controls
+        result = subprocess.run(['v4l2-ctl', '--device', video_device, '--list-ctrls'],
+                              capture_output=True, text=True, timeout=2)
+        
+        for control in ir_controls:
+            if control in result.stdout.lower():
+                # Try to set it (value depends on camera model)
+                # Usually: 0=off, 1=on for IR
+                value = 1 if enable else 0
+                subprocess.run(
+                    ['v4l2-ctl', '--device', video_device, f'--set-ctrl={control}={value}'],
+                    capture_output=True, timeout=2
+                )
+                print(f"IR mode {'enabled' if enable else 'disabled'} via {control}")
+                break
+    except Exception as e:
+        print(f"Could not set IR mode: {e}")
+
+def timelapse_worker(session_id, interval, resolution, scheduled_start=None, scheduled_end=None, 
+                     auto_adjust=False, ir_mode='auto'):
+    """Background worker for capturing timelapse frames
+    
+    Args:
+        session_id: Unique session identifier
+        interval: Seconds between captures
+        resolution: Tuple of (width, height)
+        scheduled_start: ISO format datetime to start capturing
+        scheduled_end: ISO format datetime to stop capturing
+        auto_adjust: If True, let camera auto-adjust settings between frames
+        ir_mode: 'on', 'off', or 'auto' (auto-detect based on brightness)
+    """
     frame_number = 0
     
     # Wait for scheduled start if specified
@@ -159,7 +261,7 @@ def timelapse_worker(session_id, interval, resolution, scheduled_start=None, sch
         
         try:
             with camera_lock:
-                success = capture_image(session_id, frame_number, resolution)
+                success = capture_image(session_id, frame_number, resolution, auto_adjust, ir_mode)
             
             if success:
                 frame_number += 1
@@ -271,6 +373,8 @@ def get_status():
         "scheduled_start": timelapse_state.get("scheduled_start"),
         "scheduled_end": timelapse_state.get("scheduled_end"),
         "waiting_for_start": timelapse_state.get("waiting_for_start", False),
+        "auto_adjust": timelapse_state.get("auto_adjust", False),
+        "ir_mode": timelapse_state.get("ir_mode", 'auto'),
         "camera_available": detect_camera() is not None,
         "camera_type": detect_camera()
     })
@@ -286,6 +390,8 @@ def start_timelapse():
     resolution = data.get('resolution', [1920, 1080])
     scheduled_start = data.get('scheduled_start')  # ISO datetime string
     scheduled_end = data.get('scheduled_end')      # ISO datetime string
+    auto_adjust = data.get('auto_adjust', False)   # Enable auto-adjustment
+    ir_mode = data.get('ir_mode', 'auto')          # 'on', 'off', or 'auto'
     
     # Create new session
     session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -297,6 +403,8 @@ def start_timelapse():
     timelapse_state["total_frames"] = 0
     timelapse_state["scheduled_start"] = scheduled_start
     timelapse_state["scheduled_end"] = scheduled_end
+    timelapse_state["auto_adjust"] = auto_adjust
+    timelapse_state["ir_mode"] = ir_mode
     
     if not scheduled_start:
         timelapse_state["start_time"] = datetime.now().isoformat()
@@ -306,7 +414,7 @@ def start_timelapse():
     # Start worker thread
     thread = threading.Thread(
         target=timelapse_worker,
-        args=(session_id, interval, resolution, scheduled_start, scheduled_end),
+        args=(session_id, interval, resolution, scheduled_start, scheduled_end, auto_adjust, ir_mode),
         daemon=True
     )
     thread.start()

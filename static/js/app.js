@@ -200,6 +200,13 @@ function updateUI(status) {
         const videoLength = (status.total_frames / 30).toFixed(1);
         document.getElementById('videoLength').textContent = `${videoLength}s @ 30fps`;
         
+        // Update auto-adjust and IR mode status
+        document.getElementById('autoAdjustStatus').textContent = status.auto_adjust ? '✅ On' : 'Off';
+        document.getElementById('irModeStatus').textContent = 
+            status.ir_mode === 'auto' ? '🌙 Auto' : 
+            status.ir_mode === 'on' ? '✅ Always On' : 
+            'Off';
+        
     } else {
         // Timelapse is stopped
         statusBadge.classList.remove('active');
@@ -221,6 +228,8 @@ async function startTimelapse() {
     const scheduleCheckbox = document.getElementById('scheduleCheckbox');
     const startDateTime = document.getElementById('startDateTime');
     const endDateTime = document.getElementById('endDateTime');
+    const autoAdjustCheckbox = document.getElementById('autoAdjustCheckbox');
+    const irModeSelect = document.getElementById('irModeSelect');
     
     const interval = parseInt(intervalInput.value);
     const [width, height] = resolutionSelect.value.split(',').map(Number);
@@ -232,7 +241,9 @@ async function startTimelapse() {
     
     const requestData = {
         interval: interval,
-        resolution: [width, height]
+        resolution: [width, height],
+        auto_adjust: autoAdjustCheckbox.checked,
+        ir_mode: irModeSelect.value
     };
     
     // Add scheduled times if checkbox is checked

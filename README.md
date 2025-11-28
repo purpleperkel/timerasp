@@ -9,6 +9,10 @@ A Raspberry Pi timelapse camera controller with web interface, accessible at `ti
 - 📐 **Multiple Resolutions** - Support for 4K, Full HD, HD, and VGA
 - 🎬 **Video Compilation** - Automatically compile images into MP4 videos
 - 💾 **Session Management** - Save, view, and manage multiple timelapse sessions
+- 🔧 **Auto-Adjust Mode** - Automatically adjust camera settings for changing light (sunrise/sunset)
+- 🌙 **IR Night Vision** - Automatic infrared switching for day-to-night timelapses
+- 🎛️ **Camera Controls** - Adjust brightness, contrast, saturation, exposure in real-time (USB cameras)
+- 📅 **Scheduled Capture** - Set start/end times for automated timelapses
 - 🌐 **Easy Access** - Access via `timelapsepi.local:5000` on your network
 - 🚀 **Auto-start** - Starts automatically on boot
 
