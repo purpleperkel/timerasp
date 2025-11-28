@@ -4,22 +4,32 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TimelapsePI Controller</title>
-    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/modern-glass.css">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/img/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 </head>
 <body>
     <div class="container">
         <header>
             <h1>📷 TimelapsePI</h1>
-            <div class="status-badge" id="statusBadge">
-                <span class="status-dot"></span>
-                <span id="statusText">Ready</span>
+            <div style="display: flex; align-items: center; gap: 20px;">
+                <div class="theme-switcher">
+                    <button id="themeToggle" class="btn btn-secondary" style="padding: 8px 16px; font-size: 0.9rem;">
+                        <span id="themeIcon">✨</span> <span id="themeText">Classic</span>
+                    </button>
+                </div>
+                <div class="status-badge" id="statusBadge">
+                    <span class="status-dot"></span>
+                    <span id="statusText">Ready</span>
+                </div>
             </div>
         </header>
 
         <main>
             <!-- Camera Preview Section -->
             <section class="card">
-                <h2>Camera Preview</h2>
+                <h2>📸 Camera Preview</h2>
                 <div class="preview-container">
                     <img id="cameraPreview" src="/api/camera/preview" alt="Camera Preview">
                     <div id="noCamera" class="no-camera" style="display: none;">
@@ -30,7 +40,7 @@
 
             <!-- Control Panel -->
             <section class="card">
-                <h2>Timelapse Control</h2>
+                <h2>⚙️ Timelapse Control</h2>
                 
                 <div class="control-group">
                     <label for="intervalInput">Interval (seconds):</label>
@@ -105,7 +115,7 @@
             <!-- Camera Controls -->
             <section class="card" id="cameraControlsSection" style="display: none;">
                 <h2>📹 Camera Controls (USB Camera)</h2>
-                <p style="font-size: 0.9em; color: #666; margin-bottom: 20px;">
+                <p style="font-size: 0.9em; color: rgba(255, 255, 255, 0.7); margin-bottom: 20px;">
                     Adjust camera settings for better timelapse quality. Lock exposure for consistent lighting.
                 </p>
                 
@@ -144,7 +154,7 @@
 
             <!-- Sessions List -->
             <section class="card">
-                <h2>Saved Sessions</h2>
+                <h2>💾 Saved Sessions</h2>
                 <div id="sessionsList" class="sessions-list">
                     <p class="loading">Loading sessions...</p>
                 </div>
@@ -152,8 +162,8 @@
 
             <!-- System Controls -->
             <section class="card">
-                <h2>⚙️ System Controls</h2>
-                <p style="font-size: 0.9em; color: #666; margin-bottom: 20px;">
+                <h2>🔧 System Controls</h2>
+                <p style="font-size: 0.9em; color: rgba(255, 255, 255, 0.7); margin-bottom: 20px;">
                     Control your Raspberry Pi system from the web interface.
                 </p>
                 
@@ -195,6 +205,58 @@
             </div>
         </div>
     </div>
+
+    <!-- Theme Switcher Script -->
+    <script>
+        // Theme Management
+        const themes = {
+            modern: {
+                name: 'Modern Glass',
+                file: '/static/css/modern-glass.css',
+                icon: '🎨'
+            },
+            classic: {
+                name: 'Classic',
+                file: '/static/css/style.css',
+                icon: '✨'
+            }
+        };
+
+        let currentTheme = localStorage.getItem('timelapsepi-theme') || 'modern';
+        
+        // Function to load theme
+        function loadTheme(themeName) {
+            const theme = themes[themeName];
+            if (!theme) return;
+            
+            // Update the stylesheet link
+            const styleLink = document.querySelector('link[rel="stylesheet"]');
+            styleLink.href = theme.file;
+            
+            // Update button text and icon
+            const themeText = document.getElementById('themeText');
+            const themeIcon = document.getElementById('themeIcon');
+            const nextTheme = themeName === 'modern' ? 'classic' : 'modern';
+            
+            themeText.textContent = themes[nextTheme].name;
+            themeIcon.textContent = themes[nextTheme].icon;
+            
+            // Save preference
+            localStorage.setItem('timelapsepi-theme', themeName);
+            currentTheme = themeName;
+        }
+        
+        // Load saved theme on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadTheme(currentTheme);
+            
+            // Theme toggle button
+            document.getElementById('themeToggle').addEventListener('click', function() {
+                const nextTheme = currentTheme === 'modern' ? 'classic' : 'modern';
+                loadTheme(nextTheme);
+            });
+        });
+    </script>
 
     <script src="/static/js/app.js"></script>
 </body>
