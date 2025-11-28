@@ -1,0 +1,9 @@
+# TimelapsePI sudoers configuration
+# This allows the TimelapsePI service to execute system commands
+
+# Replace 'pi' with your actual username
+pi ALL=(ALL) NOPASSWD: /sbin/shutdown
+pi ALL=(ALL) NOPASSWD: /sbin/reboot
+pi ALL=(ALL) NOPASSWD: /bin/systemctl restart timelapsepi
+pi ALL=(ALL) NOPASSWD: /bin/systemctl stop timelapsepi
+pi ALL=(ALL) NOPASSWD: /bin/systemctl start timelapsepi

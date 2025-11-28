@@ -507,5 +507,74 @@ def camera_controls():
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
+@app.route('/api/sessions/<session_id>/video/stream')
+def stream_video(session_id):
+    """Stream compiled video for preview"""
+    video_file = VIDEOS_DIR / f"{session_id}.mp4"
+    
+    if not video_file.exists():
+        return jsonify({"error": "Video not found"}), 404
+    
+    return send_file(video_file, mimetype='video/mp4')
+
+@app.route('/api/system/shutdown', methods=['POST'])
+def shutdown_system():
+    """Shutdown the system"""
+    try:
+        # Schedule shutdown in 1 minute to allow response to be sent
+        subprocess.Popen(['sudo', 'shutdown', '-h', '+1'], 
+                        stdout=subprocess.PIPE, 
+                        stderr=subprocess.PIPE)
+        return jsonify({
+            "success": True,
+            "message": "System will shutdown in 1 minute"
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/system/reboot', methods=['POST'])
+def reboot_system():
+    """Reboot the system"""
+    try:
+        # Schedule reboot in 1 minute to allow response to be sent
+        subprocess.Popen(['sudo', 'reboot'], 
+                        stdout=subprocess.PIPE, 
+                        stderr=subprocess.PIPE)
+        return jsonify({
+            "success": True,
+            "message": "System will reboot in 1 minute"
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/system/restart-service', methods=['POST'])
+def restart_service():
+    """Restart the TimelapsePI service"""
+    try:
+        # This will kill the current process, systemd will restart it
+        subprocess.Popen(['sudo', 'systemctl', 'restart', 'timelapsepi'], 
+                        stdout=subprocess.PIPE, 
+                        stderr=subprocess.PIPE)
+        return jsonify({
+            "success": True,
+            "message": "Service restarting"
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/system/cancel-shutdown', methods=['POST'])
+def cancel_shutdown():
+    """Cancel scheduled shutdown/reboot"""
+    try:
+        subprocess.run(['sudo', 'shutdown', '-c'], 
+                      capture_output=True, 
+                      timeout=2)
+        return jsonify({
+            "success": True,
+            "message": "Shutdown/reboot cancelled"
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)

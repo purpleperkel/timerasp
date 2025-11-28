@@ -58,6 +58,7 @@ Thumbs.db
 # System service files (installed to /etc/)
 # Keep in repo but ignore if copied here
 /etc/
+/etc/sudoers.d/
 
 # User-specific scripts
 run_app.sh

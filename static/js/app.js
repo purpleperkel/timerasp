@@ -272,8 +272,11 @@ async function loadSessions() {
                             🎬 Compile Video
                         </button>
                     ` : `
+                        <button class="btn btn-primary" onclick="previewVideo('${session.id}')">
+                            ▶️ Preview
+                        </button>
                         <button class="btn btn-primary" onclick="downloadVideo('${session.id}')">
-                            ⬇️ Download Video
+                            ⬇️ Download
                         </button>
                     `}
                     <button class="btn btn-danger" onclick="deleteSession('${session.id}')">
@@ -452,5 +455,189 @@ async function applyCameraSettings() {
     } catch (error) {
         console.error('Error applying camera settings:', error);
         alert('Error applying camera settings');
+    }
+}
+
+// Video Preview Functions
+function previewVideo(sessionId) {
+    const modal = document.getElementById('videoModal');
+    const video = document.getElementById('videoPlayer');
+    const source = document.getElementById('videoSource');
+    const title = document.getElementById('videoModalTitle');
+    const downloadBtn = document.getElementById('downloadFromPreview');
+    
+    // Set video source
+    source.src = `/api/sessions/${sessionId}/video/stream`;
+    video.load();
+    
+    // Update title
+    title.textContent = `Preview: ${sessionId}`;
+    
+    // Set download button
+    downloadBtn.onclick = () => downloadVideo(sessionId);
+    
+    // Show modal
+    modal.style.display = 'flex';
+}
+
+// Initialize modal controls
+document.addEventListener('DOMContentLoaded', () => {
+    const modal = document.getElementById('videoModal');
+    const closeBtn = document.querySelector('.modal-close');
+    const closePreviewBtn = document.getElementById('closePreview');
+    const video = document.getElementById('videoPlayer');
+    
+    // Close modal functions
+    const closeModal = () => {
+        modal.style.display = 'none';
+        video.pause();
+    };
+    
+    if (closeBtn) closeBtn.onclick = closeModal;
+    if (closePreviewBtn) closePreviewBtn.onclick = closeModal;
+    
+    // Close on outside click
+    window.onclick = (event) => {
+        if (event.target === modal) {
+            closeModal();
+        }
+    };
+    
+    // Close on Escape key
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && modal.style.display === 'flex') {
+            closeModal();
+        }
+    });
+    
+    // Initialize system controls
+    initializeSystemControls();
+});
+
+// System Control Functions
+function initializeSystemControls() {
+    const restartServiceBtn = document.getElementById('restartServiceBtn');
+    const rebootBtn = document.getElementById('rebootBtn');
+    const shutdownBtn = document.getElementById('shutdownBtn');
+    const warningDiv = document.getElementById('systemActionWarning');
+    const warningText = document.getElementById('warningText');
+    const confirmBtn = document.getElementById('confirmActionBtn');
+    const cancelBtn = document.getElementById('cancelActionBtn');
+    
+    let pendingAction = null;
+    
+    const showWarning = (message, action) => {
+        warningText.textContent = message;
+        warningDiv.style.display = 'block';
+        pendingAction = action;
+    };
+    
+    const hideWarning = () => {
+        warningDiv.style.display = 'none';
+        pendingAction = null;
+    };
+    
+    if (restartServiceBtn) {
+        restartServiceBtn.onclick = () => {
+            showWarning(
+                'This will restart the TimelapsePI service. Active timelapses will be stopped. Continue?',
+                restartService
+            );
+        };
+    }
+    
+    if (rebootBtn) {
+        rebootBtn.onclick = () => {
+            showWarning(
+                'This will reboot your Raspberry Pi in 1 minute. All active timelapses will be stopped. Continue?',
+                rebootSystem
+            );
+        };
+    }
+    
+    if (shutdownBtn) {
+        shutdownBtn.onclick = () => {
+            showWarning(
+                'This will shutdown your Raspberry Pi in 1 minute. All active timelapses will be stopped. Continue?',
+                shutdownSystem
+            );
+        };
+    }
+    
+    if (confirmBtn) {
+        confirmBtn.onclick = () => {
+            if (pendingAction) {
+                pendingAction();
+                hideWarning();
+            }
+        };
+    }
+    
+    if (cancelBtn) {
+        cancelBtn.onclick = hideWarning;
+    }
+}
+
+async function restartService() {
+    try {
+        const response = await fetch('/api/system/restart-service', {
+            method: 'POST'
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            alert('✅ Service restarting... Page will reload in 5 seconds.');
+            setTimeout(() => {
+                location.reload();
+            }, 5000);
+        } else {
+            alert('❌ Error: ' + (data.error || 'Failed to restart service'));
+        }
+    } catch (error) {
+        console.error('Error restarting service:', error);
+        alert('❌ Error restarting service. Check the logs.');
+    }
+}
+
+async function rebootSystem() {
+    try {
+        const response = await fetch('/api/system/reboot', {
+            method: 'POST'
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            alert('✅ System rebooting in 1 minute... You can cancel with "sudo shutdown -c" on the Pi.');
+            // Disable all buttons
+            document.querySelectorAll('button').forEach(btn => btn.disabled = true);
+        } else {
+            alert('❌ Error: ' + (data.error || 'Failed to reboot'));
+        }
+    } catch (error) {
+        console.error('Error rebooting:', error);
+        alert('❌ Error rebooting system');
+    }
+}
+
+async function shutdownSystem() {
+    try {
+        const response = await fetch('/api/system/shutdown', {
+            method: 'POST'
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            alert('✅ System shutting down in 1 minute... You can cancel with "sudo shutdown -c" on the Pi.');
+            // Disable all buttons
+            document.querySelectorAll('button').forEach(btn => btn.disabled = true);
+        } else {
+            alert('❌ Error: ' + (data.error || 'Failed to shutdown'));
+        }
+    } catch (error) {
+        console.error('Error shutting down:', error);
+        alert('❌ Error shutting down system');
     }
 }

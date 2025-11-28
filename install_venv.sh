@@ -107,6 +107,20 @@ sudo cp timelapsepi-venv.service /etc/systemd/system/timelapsepi.service
 sudo systemctl daemon-reload
 sudo systemctl enable timelapsepi.service
 
+# Set up sudoers for system commands
+echo "🔐 Setting up sudo permissions..."
+sudo cp timelapsepi-sudoers /etc/sudoers.d/timelapsepi
+sudo sed -i "s|^pi |$USER |g" /etc/sudoers.d/timelapsepi
+sudo chmod 0440 /etc/sudoers.d/timelapsepi
+
+# Verify sudoers file syntax
+if sudo visudo -c -f /etc/sudoers.d/timelapsepi; then
+    echo "✅ Sudo permissions configured"
+else
+    echo "⚠️  Warning: Sudoers file has syntax errors, removing it"
+    sudo rm /etc/sudoers.d/timelapsepi
+fi
+
 # Set up Avahi service for .local domain
 echo "🌐 Setting up timelapsepi.local domain..."
 sudo cp timelapsepi.avahi-service /etc/avahi/services/timelapsepi.service
