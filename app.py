@@ -852,10 +852,11 @@ def stream_video(session_id):
 @app.route('/api/current-session/preview', methods=['POST'])
 def preview_current_session():
     """Generate a preview video of the current recording session"""
-    if not timelapse_state["active"] and not timelapse_state["current_session"]:
-        return jsonify({"error": "No active session"}), 400
+    session_id = timelapse_state.get("current_session")
     
-    session_id = timelapse_state["current_session"]
+    if not session_id:
+        return jsonify({"error": "No session available"}), 400
+    
     data = request.json or {}
     fps = data.get('fps', 30)
     
@@ -893,11 +894,14 @@ def preview_current_session():
                 "frame_count": len(images)
             })
         else:
-            return jsonify({"error": "Failed to generate preview"}), 500
+            error_msg = result.stderr.decode('utf-8') if result.stderr else "Unknown error"
+            print(f"FFmpeg error: {error_msg}")
+            return jsonify({"error": f"Failed to generate preview: {error_msg[:200]}"}), 500
             
     except subprocess.TimeoutExpired:
         return jsonify({"error": "Preview generation timed out"}), 500
     except Exception as e:
+        print(f"Preview error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/current-session/preview/video')

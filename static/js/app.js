@@ -624,15 +624,29 @@ function previewVideo(sessionId) {
     const source = document.getElementById('videoSource');
     const title = document.getElementById('videoModalTitle');
     const downloadBtn = document.getElementById('downloadFromPreview');
+    const videoContainer = document.querySelector('.video-container');
+    
+    // Add loading state
+    if (videoContainer) {
+        videoContainer.classList.add('loading');
+    }
     
     // Set video source
     source.src = `/api/sessions/${sessionId}/video/stream`;
     video.load();
     
+    // Remove loading state when video loads
+    video.addEventListener('loadeddata', () => {
+        if (videoContainer) {
+            videoContainer.classList.remove('loading');
+        }
+    }, { once: true });
+    
     // Update title
     title.textContent = `Preview: ${sessionId}`;
     
     // Set download button
+    downloadBtn.style.display = 'inline-block';
     downloadBtn.onclick = () => downloadVideo(sessionId);
     
     // Show modal
@@ -826,9 +840,22 @@ async function previewCurrentSession() {
             const source = document.getElementById('videoSource');
             const title = document.getElementById('videoModalTitle');
             const downloadBtn = document.getElementById('downloadFromPreview');
+            const videoContainer = document.querySelector('.video-container');
+            
+            // Add loading state
+            if (videoContainer) {
+                videoContainer.classList.add('loading');
+            }
             
             source.src = '/api/current-session/preview/video';
             video.load();
+            
+            // Remove loading state when video loads
+            video.addEventListener('loadeddata', () => {
+                if (videoContainer) {
+                    videoContainer.classList.remove('loading');
+                }
+            }, { once: true });
             
             title.textContent = 'Current Session Preview';
             downloadBtn.style.display = 'none'; // Can't download preview
@@ -844,7 +871,7 @@ async function previewCurrentSession() {
         }
     } catch (error) {
         console.error('Error previewing current session:', error);
-        alert('Error generating preview');
+        alert('Error generating preview: ' + error.message);
         btn.textContent = originalText;
         btn.disabled = false;
     }
