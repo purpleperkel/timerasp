@@ -738,18 +738,38 @@ async function previewCurrentSession() {
     const btn = document.getElementById('previewCurrentBtn');
     const originalText = btn.textContent;
     
-    btn.textContent = '⏳ Generating...';
+    // Get current frame count from stats if available
+    const frameCountEl = document.getElementById('frameCount');
+    const frameCount = frameCountEl ? parseInt(frameCountEl.textContent) : 0;
+    
+    // Show appropriate message based on frame count
+    if (frameCount > 200) {
+        btn.textContent = `⏳ Generating (${frameCount} frames)...`;
+        if (frameCount > 500) {
+            // Show additional warning for very large previews
+            showToast(`Generating preview with ${frameCount} frames. This may take a minute...`, 'info');
+        }
+    } else {
+        btn.textContent = '⏳ Generating...';
+    }
     btn.disabled = true;
     
     try {
+        // Increase timeout for large frame counts (max 300 seconds)
+        const controller = new AbortController();
+        const timeoutMs = Math.min(300000, Math.max(60000, 30000 + (frameCount * 300))); // Dynamic timeout, max 5 minutes
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        
         const response = await fetch('/api/current-session/preview', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ fps: 30 })
+            body: JSON.stringify({ fps: 30 }),
+            signal: controller.signal
         });
         
+        clearTimeout(timeoutId);
         const data = await response.json();
         
         if (data.success) {
@@ -763,7 +783,16 @@ async function previewCurrentSession() {
             source.src = '/api/current-session/preview/video';
             video.load();
             
-            title.textContent = 'Current Session Preview';
+            // Update title with frame info
+            let titleText = 'Current Session Preview';
+            if (data.sampled) {
+                titleText += ` (Sampled: ${data.preview_frame_count} of ${data.frame_count} frames)`;
+                showToast('Preview uses sampled frames for faster generation', 'info');
+            } else if (data.frame_count) {
+                titleText += ` (${data.frame_count} frames)`;
+            }
+            title.textContent = titleText;
+            
             downloadBtn.style.display = 'none'; // Can't download preview
             
             modal.style.display = 'flex';
@@ -771,15 +800,51 @@ async function previewCurrentSession() {
             btn.textContent = originalText;
             btn.disabled = false;
         } else {
-            alert('Error generating preview: ' + (data.error || 'Unknown error'));
+            // More informative error messages
+            let errorMsg = data.error || 'Unknown error';
+            if (errorMsg.includes('timed out')) {
+                errorMsg = `Preview generation timed out with ${frameCount} frames. Try again or wait for fewer frames.`;
+            }
+            alert('Error generating preview: ' + errorMsg);
             btn.textContent = originalText;
             btn.disabled = false;
         }
     } catch (error) {
         console.error('Error previewing current session:', error);
-        alert('Error generating preview');
+        let errorMsg = 'Error generating preview';
+        if (error.name === 'AbortError') {
+            errorMsg = `Preview generation timed out (${frameCount} frames). The video may be too long.`;
+        }
+        alert(errorMsg);
         btn.textContent = originalText;
         btn.disabled = false;
+    }
+}
+
+// Helper function to show toast notifications (if not already defined)
+function showToast(message, type = 'info') {
+    // Check if a toast function exists, otherwise use console
+    if (typeof window.showToast === 'function') {
+        window.showToast(message, type);
+    } else {
+        console.log(`[${type.toUpperCase()}] ${message}`);
+        // Create a simple toast if none exists
+        const toast = document.createElement('div');
+        toast.className = 'toast';
+        toast.textContent = message;
+        toast.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            border-radius: 8px;
+            z-index: 10000;
+            animation: slideIn 0.3s ease;
+        `;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 5000);
     }
 }
 

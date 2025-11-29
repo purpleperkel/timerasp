@@ -660,39 +660,114 @@ def preview_current_session():
     
     # Count current frames
     images = sorted(session_dir.glob("frame_*.jpg"))
-    if len(images) < 2:
+    frame_count = len(images)
+    if frame_count < 2:
         return jsonify({"error": "Not enough frames yet (need at least 2)"}), 400
     
     # Generate preview video
     preview_file = VIDEOS_DIR / f"{session_id}_preview.mp4"
     
     try:
-        cmd = [
-            'ffmpeg',
-            '-y',  # Overwrite
-            '-framerate', str(fps),
-            '-pattern_type', 'glob',
-            '-i', str(session_dir / 'frame_*.jpg'),
-            '-c:v', 'libx264',
-            '-pix_fmt', 'yuv420p',
-            '-crf', '23',
-            str(preview_file)
-        ]
+        # For large frame counts, use lower quality/faster encoding
+        # and sample frames if there are too many
+        if frame_count > 200:
+            # Use faster encoding preset and lower quality for previews
+            preset = 'ultrafast'
+            crf = '28'  # Lower quality for faster encoding
+            # Sample every nth frame for very long sequences
+            if frame_count > 500:
+                # Create temporary file list with sampled frames
+                step = frame_count // 300  # Limit to ~300 frames max
+                sampled_images = images[::step]
+                temp_list = session_dir / 'preview_frames.txt'
+                with open(temp_list, 'w') as f:
+                    for img in sampled_images:
+                        f.write(f"file '{img.name}'\n")
+                
+                cmd = [
+                    'ffmpeg',
+                    '-y',  # Overwrite
+                    '-f', 'concat',
+                    '-safe', '0',
+                    '-i', str(temp_list),
+                    '-c:v', 'libx264',
+                    '-preset', preset,
+                    '-pix_fmt', 'yuv420p',
+                    '-crf', crf,
+                    '-vf', 'scale=1280:720',  # Scale down for faster encoding
+                    str(preview_file)
+                ]
+            else:
+                # Use all frames but with faster encoding
+                cmd = [
+                    'ffmpeg',
+                    '-y',  # Overwrite
+                    '-framerate', str(fps),
+                    '-pattern_type', 'glob',
+                    '-i', str(session_dir / 'frame_*.jpg'),
+                    '-c:v', 'libx264',
+                    '-preset', preset,
+                    '-pix_fmt', 'yuv420p',
+                    '-crf', crf,
+                    '-vf', 'scale=1280:720',  # Scale down for faster encoding
+                    str(preview_file)
+                ]
+        else:
+            # Original quality for smaller frame counts
+            cmd = [
+                'ffmpeg',
+                '-y',  # Overwrite
+                '-framerate', str(fps),
+                '-pattern_type', 'glob',
+                '-i', str(session_dir / 'frame_*.jpg'),
+                '-c:v', 'libx264',
+                '-preset', 'fast',  # Balanced preset
+                '-pix_fmt', 'yuv420p',
+                '-crf', '23',
+                str(preview_file)
+            ]
         
-        result = subprocess.run(cmd, capture_output=True, timeout=60)
+        # Dynamic timeout based on frame count (minimum 60s, max 300s, add 0.3s per frame)
+        timeout_seconds = min(300, max(60, 30 + (frame_count * 0.3)))
+        
+        result = subprocess.run(cmd, capture_output=True, timeout=timeout_seconds)
+        
+        # Clean up temp file if created
+        temp_list = session_dir / 'preview_frames.txt'
+        if temp_list.exists():
+            temp_list.unlink()
         
         if result.returncode == 0 and preview_file.exists():
+            # Get actual frame count used in preview
+            preview_frames = frame_count
+            if frame_count > 500:
+                preview_frames = len(sampled_images) if 'sampled_images' in locals() else frame_count
+            
             return jsonify({
                 "success": True,
                 "preview_url": f"/api/current-session/preview/video",
-                "frame_count": len(images)
+                "frame_count": frame_count,
+                "preview_frame_count": preview_frames,
+                "sampled": frame_count > 500
             })
         else:
-            return jsonify({"error": "Failed to generate preview"}), 500
+            error_msg = result.stderr.decode('utf-8') if result.stderr else "Unknown error"
+            return jsonify({"error": f"Failed to generate preview: {error_msg[:200]}"}), 500
             
     except subprocess.TimeoutExpired:
-        return jsonify({"error": "Preview generation timed out"}), 500
+        # Clean up temp file if created
+        temp_list = session_dir / 'preview_frames.txt'
+        if temp_list.exists():
+            temp_list.unlink()
+        return jsonify({
+            "error": f"Preview generation timed out after {timeout_seconds}s. Try reducing frame count or wait for processing.",
+            "frame_count": frame_count
+        }), 500
     except Exception as e:
+        # Clean up temp file if created
+        temp_list = session_dir / 'preview_frames.txt'
+        if temp_list.exists():
+            temp_list.unlink()
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/current-session/preview/video')
