@@ -32,13 +32,16 @@ CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
 timelapse_state = {
     "active": False,
     "current_session": None,
-    "interval": 5,  # seconds
+    "interval": 5,  # seconds (default/fallback)
     "total_frames": 0,
     "start_time": None,
     "scheduled_start": None,  # ISO datetime string
     "scheduled_end": None,    # ISO datetime string
     "thread": None,
-    "waiting_for_start": False
+    "waiting_for_start": False,
+    "use_variable_intervals": False,
+    "interval_schedule": [],  # List of time-based interval periods
+    "current_interval": 5     # Current active interval (may change based on time)
 }
 
 camera_lock = threading.Lock()
@@ -130,8 +133,33 @@ def capture_image(session_id, frame_number, resolution=(1920, 1080)):
     
     return filename.exists()
 
+def get_current_interval_from_schedule(schedule):
+    """Get the current interval based on time-based schedule"""
+    if not schedule:
+        return None
+    
+    now = datetime.now()
+    current_time = now.strftime("%H:%M")
+    
+    for period in schedule:
+        # Parse times
+        start_time = period['start']
+        end_time = period['end']
+        
+        # Handle overnight periods
+        if start_time <= end_time:
+            # Normal period (same day)
+            if start_time <= current_time < end_time:
+                return period['interval']
+        else:
+            # Overnight period (crosses midnight)
+            if current_time >= start_time or current_time < end_time:
+                return period['interval']
+    
+    return None  # No matching period
+
 def timelapse_worker(session_id, interval, resolution, scheduled_start=None, scheduled_end=None):
-    """Background worker for capturing timelapse frames"""
+    """Background worker for capturing timelapse frames with support for variable intervals"""
     frame_number = 0
     
     # Wait for scheduled start if specified
@@ -165,8 +193,21 @@ def timelapse_worker(session_id, interval, resolution, scheduled_start=None, sch
                 frame_number += 1
                 timelapse_state["total_frames"] = frame_number
             
+            # Determine the interval to use
+            current_interval = interval  # Default
+            
+            # Check if we should use variable intervals
+            if timelapse_state.get("use_variable_intervals") and timelapse_state.get("interval_schedule"):
+                scheduled_interval = get_current_interval_from_schedule(timelapse_state["interval_schedule"])
+                if scheduled_interval is not None:
+                    current_interval = scheduled_interval
+                    # Update state to reflect current interval
+                    if timelapse_state["current_interval"] != current_interval:
+                        timelapse_state["current_interval"] = current_interval
+                        print(f"Interval changed to {current_interval} seconds based on schedule")
+            
             # Wait for the interval
-            time.sleep(interval)
+            time.sleep(current_interval)
             
         except Exception as e:
             print(f"Error capturing frame: {e}")
@@ -261,8 +302,8 @@ def camera_info():
 
 @app.route('/api/status')
 def get_status():
-    """Get current timelapse status"""
-    return jsonify({
+    """Get current timelapse status including variable interval information"""
+    status_data = {
         "active": timelapse_state["active"],
         "session_id": timelapse_state["current_session"],
         "interval": timelapse_state["interval"],
@@ -273,11 +314,19 @@ def get_status():
         "waiting_for_start": timelapse_state.get("waiting_for_start", False),
         "camera_available": detect_camera() is not None,
         "camera_type": detect_camera()
-    })
+    }
+    
+    # Add variable interval information if active
+    if timelapse_state.get("use_variable_intervals"):
+        status_data["use_variable_intervals"] = True
+        status_data["current_interval"] = timelapse_state.get("current_interval", timelapse_state["interval"])
+        status_data["interval_schedule"] = timelapse_state.get("interval_schedule", [])
+    
+    return jsonify(status_data)
 
 @app.route('/api/start', methods=['POST'])
 def start_timelapse():
-    """Start a new timelapse"""
+    """Start a new timelapse with support for variable intervals"""
     if timelapse_state["active"]:
         return jsonify({"error": "Timelapse already active"}), 400
     
@@ -286,6 +335,8 @@ def start_timelapse():
     resolution = data.get('resolution', [1920, 1080])
     scheduled_start = data.get('scheduled_start')  # ISO datetime string
     scheduled_end = data.get('scheduled_end')      # ISO datetime string
+    use_variable_intervals = data.get('use_variable_intervals', False)
+    interval_schedule = data.get('interval_schedule', [])
     
     # Create new session
     session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -297,11 +348,18 @@ def start_timelapse():
     timelapse_state["total_frames"] = 0
     timelapse_state["scheduled_start"] = scheduled_start
     timelapse_state["scheduled_end"] = scheduled_end
+    timelapse_state["use_variable_intervals"] = use_variable_intervals
+    timelapse_state["interval_schedule"] = interval_schedule
+    timelapse_state["current_interval"] = interval  # Start with default
     
     if not scheduled_start:
         timelapse_state["start_time"] = datetime.now().isoformat()
     else:
         timelapse_state["start_time"] = None  # Will be set when actually starts
+    
+    # Log variable intervals if enabled
+    if use_variable_intervals and interval_schedule:
+        print(f"Starting timelapse with variable intervals: {interval_schedule}")
     
     # Start worker thread
     thread = threading.Thread(
@@ -317,7 +375,9 @@ def start_timelapse():
         "session_id": session_id,
         "interval": interval,
         "scheduled_start": scheduled_start,
-        "scheduled_end": scheduled_end
+        "scheduled_end": scheduled_end,
+        "use_variable_intervals": use_variable_intervals,
+        "interval_schedule": interval_schedule if use_variable_intervals else None
     })
 
 @app.route('/api/stop', methods=['POST'])

@@ -28,6 +28,8 @@ function initializeUI() {
     const intervalInput = document.getElementById('intervalInput');
     const scheduleCheckbox = document.getElementById('scheduleCheckbox');
     const scheduleControls = document.getElementById('scheduleControls');
+    const variableIntervalsCheckbox = document.getElementById('variableIntervalsCheckbox');
+    const variableIntervalsControls = document.getElementById('variableIntervalsControls');
     
     startBtn.addEventListener('click', startTimelapse);
     stopBtn.addEventListener('click', stopTimelapse);
@@ -40,6 +42,23 @@ function initializeUI() {
         scheduleCheckbox.addEventListener('change', (e) => {
             scheduleControls.style.display = e.target.checked ? 'block' : 'none';
         });
+    }
+    
+    // Initialize variable intervals UI
+    if (variableIntervalsCheckbox) {
+        variableIntervalsCheckbox.addEventListener('change', (e) => {
+            variableIntervalsControls.style.display = e.target.checked ? 'block' : 'none';
+            if (e.target.checked && document.querySelectorAll('.interval-schedule-item').length === 0) {
+                // Add a default time period when first enabled
+                addDefaultTimePeriodsExample();
+            }
+        });
+    }
+    
+    // Add interval button
+    const addIntervalBtn = document.getElementById('addIntervalBtn');
+    if (addIntervalBtn) {
+        addIntervalBtn.addEventListener('click', addIntervalScheduleItem);
     }
     
     // Handle camera preview errors
@@ -172,6 +191,23 @@ function updateUI(status) {
         document.getElementById('sessionId').textContent = status.session_id || '-';
         document.getElementById('frameCount').textContent = status.total_frames || 0;
         
+        // Show current interval if using variable intervals
+        if (status.use_variable_intervals && status.current_interval) {
+            const intervalDisplay = document.getElementById('intervalDisplay');
+            if (!intervalDisplay) {
+                // Create interval display if it doesn't exist
+                const stat = document.createElement('div');
+                stat.className = 'stat';
+                stat.innerHTML = `
+                    <span class="stat-label">Current Interval:</span>
+                    <span class="stat-value" id="intervalDisplay">${status.current_interval}s</span>
+                `;
+                statsPanel.appendChild(stat);
+            } else {
+                intervalDisplay.textContent = `${status.current_interval}s`;
+            }
+        }
+        
         // Show scheduled end time if set
         if (status.scheduled_end) {
             scheduledEndStat.style.display = 'block';
@@ -221,6 +257,7 @@ async function startTimelapse() {
     const scheduleCheckbox = document.getElementById('scheduleCheckbox');
     const startDateTime = document.getElementById('startDateTime');
     const endDateTime = document.getElementById('endDateTime');
+    const variableIntervalsCheckbox = document.getElementById('variableIntervalsCheckbox');
     
     const interval = parseInt(intervalInput.value);
     const [width, height] = resolutionSelect.value.split(',').map(Number);
@@ -234,6 +271,24 @@ async function startTimelapse() {
         interval: interval,
         resolution: [width, height]
     };
+    
+    // Add variable interval schedule if enabled
+    if (variableIntervalsCheckbox && variableIntervalsCheckbox.checked) {
+        const intervalSchedule = getIntervalSchedule();
+        
+        if (intervalSchedule.length > 0) {
+            // Validate schedule before sending
+            if (!validateIntervalSchedule()) {
+                return;
+            }
+            
+            requestData.interval_schedule = intervalSchedule;
+            requestData.use_variable_intervals = true;
+            
+            // Show info about variable intervals
+            console.log('Starting timelapse with variable intervals:', intervalSchedule);
+        }
+    }
     
     // Add scheduled times if checkbox is checked
     if (scheduleCheckbox.checked) {
@@ -886,4 +941,132 @@ async function rotateVideo(sessionId) {
         console.error('Error rotating video:', error);
         alert('Error rotating video');
     }
+}
+
+// ============================================
+// Time-based Interval Management Functions
+// ============================================
+
+function addIntervalScheduleItem(startTime = '', endTime = '', interval = 5) {
+    const list = document.getElementById('intervalScheduleList');
+    const itemId = 'interval-' + Date.now();
+    
+    const item = document.createElement('div');
+    item.className = 'interval-schedule-item';
+    item.id = itemId;
+    item.innerHTML = `
+        <div>
+            <label class="time-period-label">Start Time</label>
+            <input type="time" class="interval-start-time" value="${startTime}" required>
+        </div>
+        <div>
+            <label class="time-period-label">End Time</label>
+            <input type="time" class="interval-end-time" value="${endTime}" required>
+        </div>
+        <div>
+            <label class="time-period-label">Interval (s)</label>
+            <input type="number" class="interval-value" value="${interval}" min="1" max="3600" step="1" required>
+        </div>
+        <button type="button" class="remove-interval-btn" onclick="removeIntervalScheduleItem('${itemId}')">×</button>
+    `;
+    
+    list.appendChild(item);
+}
+
+window.removeIntervalScheduleItem = function(itemId) {
+    const item = document.getElementById(itemId);
+    if (item) {
+        item.remove();
+    }
+}
+
+function addDefaultTimePeriodsExample() {
+    // Add example time periods for common scenarios
+    addIntervalScheduleItem('06:00', '08:00', 2);  // Sunrise - fast capture
+    addIntervalScheduleItem('08:00', '17:00', 30); // Day - slower capture
+    addIntervalScheduleItem('17:00', '19:00', 2);  // Sunset - fast capture
+    addIntervalScheduleItem('19:00', '06:00', 60); // Night - very slow capture
+}
+
+function getIntervalSchedule() {
+    const items = document.querySelectorAll('.interval-schedule-item');
+    const schedule = [];
+    
+    items.forEach(item => {
+        const startTime = item.querySelector('.interval-start-time').value;
+        const endTime = item.querySelector('.interval-end-time').value;
+        const interval = parseInt(item.querySelector('.interval-value').value);
+        
+        if (startTime && endTime && interval) {
+            schedule.push({
+                start: startTime,
+                end: endTime,
+                interval: interval
+            });
+        }
+    });
+    
+    // Sort by start time
+    schedule.sort((a, b) => a.start.localeCompare(b.start));
+    
+    return schedule;
+}
+
+function validateIntervalSchedule() {
+    const schedule = getIntervalSchedule();
+    
+    // Check for overlaps
+    for (let i = 0; i < schedule.length - 1; i++) {
+        const current = schedule[i];
+        const next = schedule[i + 1];
+        
+        // Convert times to minutes for comparison
+        const currentEnd = timeToMinutes(current.end);
+        const nextStart = timeToMinutes(next.start);
+        
+        // Handle overnight periods
+        if (currentEnd > nextStart && current.end > current.start) {
+            alert(`Time period overlap detected between ${current.start}-${current.end} and ${next.start}-${next.end}`);
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+function timeToMinutes(timeStr) {
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    return hours * 60 + minutes;
+}
+
+function getCurrentIntervalFromSchedule(schedule) {
+    if (!schedule || schedule.length === 0) {
+        return null;
+    }
+    
+    const now = new Date();
+    const currentTime = now.getHours().toString().padStart(2, '0') + ':' + 
+                       now.getMinutes().toString().padStart(2, '0');
+    const currentMinutes = timeToMinutes(currentTime);
+    
+    for (const period of schedule) {
+        const startMinutes = timeToMinutes(period.start);
+        const endMinutes = timeToMinutes(period.end);
+        
+        // Handle normal periods (same day)
+        if (startMinutes <= endMinutes) {
+            if (currentMinutes >= startMinutes && currentMinutes < endMinutes) {
+                return period.interval;
+            }
+        } 
+        // Handle overnight periods
+        else {
+            if (currentMinutes >= startMinutes || currentMinutes < endMinutes) {
+                return period.interval;
+            }
+        }
+    }
+    
+    // No matching period found, return null (will use default interval)
+    return null;
 }
