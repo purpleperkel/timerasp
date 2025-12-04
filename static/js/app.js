@@ -24,15 +24,27 @@ document.addEventListener('DOMContentLoaded', () => {
 function initializeUI() {
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const resumeBtn = document.getElementById('resumeBtn');
     const previewCurrentBtn = document.getElementById('previewCurrentBtn');
     const intervalInput = document.getElementById('intervalInput');
     const scheduleCheckbox = document.getElementById('scheduleCheckbox');
     const scheduleControls = document.getElementById('scheduleControls');
     const variableIntervalsCheckbox = document.getElementById('variableIntervalsCheckbox');
     const variableIntervalsControls = document.getElementById('variableIntervalsControls');
+    const timestampCheckbox = document.getElementById('timestampCheckbox');
+    const timestampControls = document.getElementById('timestampControls');
     
     startBtn.addEventListener('click', startTimelapse);
     stopBtn.addEventListener('click', stopTimelapse);
+    
+    if (pauseBtn) {
+        pauseBtn.addEventListener('click', pauseTimelapse);
+    }
+    
+    if (resumeBtn) {
+        resumeBtn.addEventListener('click', resumeTimelapse);
+    }
     
     if (previewCurrentBtn) {
         previewCurrentBtn.addEventListener('click', previewCurrentSession);
@@ -52,6 +64,21 @@ function initializeUI() {
                 // Add a default time period when first enabled
                 addDefaultTimePeriodsExample();
             }
+        });
+    }
+    
+    // Initialize timestamp UI
+    if (timestampCheckbox) {
+        timestampCheckbox.addEventListener('change', (e) => {
+            timestampControls.style.display = e.target.checked ? 'block' : 'none';
+        });
+    }
+    
+    // Timestamp size slider
+    const timestampSize = document.getElementById('timestampSize');
+    if (timestampSize) {
+        timestampSize.addEventListener('input', (e) => {
+            document.getElementById('timestampSizeValue').textContent = e.target.value;
         });
     }
     
@@ -154,6 +181,8 @@ function updateUI(status) {
     const statusText = document.getElementById('statusText');
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const resumeBtn = document.getElementById('resumeBtn');
     const previewCurrentBtn = document.getElementById('previewCurrentBtn');
     const statsPanel = document.getElementById('statsPanel');
     const intervalInput = document.getElementById('intervalInput');
@@ -182,6 +211,8 @@ function updateUI(status) {
         }
         
         startBtn.style.display = 'none';
+        pauseBtn.style.display = 'block';
+        resumeBtn.style.display = 'none';
         stopBtn.style.display = 'block';
         previewCurrentBtn.style.display = status.total_frames >= 2 ? 'block' : 'none';
         statsPanel.style.display = 'grid';
@@ -236,12 +267,39 @@ function updateUI(status) {
         const videoLength = (status.total_frames / 30).toFixed(1);
         document.getElementById('videoLength').textContent = `${videoLength}s @ 30fps`;
         
+    } else if (status.paused) {
+        // Timelapse is paused
+        statusBadge.classList.remove('active');
+        statusText.textContent = `Paused (${status.total_frames} frames)`;
+        startBtn.style.display = 'none';
+        pauseBtn.style.display = 'none';
+        resumeBtn.style.display = 'block';
+        stopBtn.style.display = 'block';
+        previewCurrentBtn.style.display = status.total_frames >= 2 ? 'block' : 'none';
+        statsPanel.style.display = 'grid';
+        intervalInput.disabled = true;
+        
+        // Update stats for paused session
+        document.getElementById('sessionId').textContent = status.session_id || '-';
+        document.getElementById('frameCount').textContent = status.total_frames || 0;
+        document.getElementById('recordingStatus').textContent = 'Paused';
+        
+        // Show pause duration
+        if (status.pause_time) {
+            const pauseTime = new Date(status.pause_time);
+            const now = new Date();
+            const pauseDuration = Math.floor((now - pauseTime) / 1000);
+            document.getElementById('duration').textContent = `Paused for ${formatDuration(pauseDuration)}`;
+        }
+        
     } else {
         // Timelapse is stopped
         statusBadge.classList.remove('active');
         const cameraTypeText = status.camera_type === 'usb' ? 'USB Camera' : (status.camera_type === 'libcamera' ? 'Pi Camera' : 'No Camera');
         statusText.textContent = status.camera_available ? `Ready (${cameraTypeText})` : 'No Camera';
         startBtn.style.display = 'block';
+        pauseBtn.style.display = 'none';
+        resumeBtn.style.display = 'none';
         stopBtn.style.display = 'none';
         previewCurrentBtn.style.display = 'none';
         statsPanel.style.display = 'none';
@@ -258,6 +316,7 @@ async function startTimelapse() {
     const startDateTime = document.getElementById('startDateTime');
     const endDateTime = document.getElementById('endDateTime');
     const variableIntervalsCheckbox = document.getElementById('variableIntervalsCheckbox');
+    const timestampCheckbox = document.getElementById('timestampCheckbox');
     
     const interval = parseInt(intervalInput.value);
     const [width, height] = resolutionSelect.value.split(',').map(Number);
@@ -271,6 +330,25 @@ async function startTimelapse() {
         interval: interval,
         resolution: [width, height]
     };
+    
+    // Add timestamp configuration if enabled
+    if (timestampCheckbox && timestampCheckbox.checked) {
+        const timestampFormat = document.getElementById('timestampFormat').value;
+        const timestampPosition = document.getElementById('timestampPosition').value;
+        const timestampSize = parseInt(document.getElementById('timestampSize').value);
+        const timestampColor = document.getElementById('timestampColor').value.split(',').map(Number);
+        const timestampBackground = document.getElementById('timestampBackground').checked;
+        
+        requestData.timestamp_config = {
+            enabled: true,
+            format: timestampFormat,
+            position: timestampPosition,
+            font_size: timestampSize,
+            font_color: timestampColor,
+            background_color: timestampBackground ? [0, 0, 0, 128] : null,
+            margin: 20
+        };
+    }
     
     // Add variable interval schedule if enabled
     if (variableIntervalsCheckbox && variableIntervalsCheckbox.checked) {
@@ -366,6 +444,62 @@ async function stopTimelapse() {
     } catch (error) {
         console.error('Error stopping timelapse:', error);
         alert('Error stopping timelapse');
+    }
+}
+
+async function pauseTimelapse() {
+    if (!confirm('Pause the current timelapse? You can resume it later, even after restarting.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/pause', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            console.log('Timelapse paused successfully');
+            showToast('Timelapse paused. You can safely restart the system and resume later.', 'info');
+            
+            // Force UI update
+            await checkStatus();
+        } else {
+            alert('Error pausing: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error pausing timelapse:', error);
+        alert('Error pausing timelapse');
+    }
+}
+
+async function resumeTimelapse() {
+    try {
+        const response = await fetch('/api/resume', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            console.log(`Timelapse resumed from frame ${data.resumed_from_frame}`);
+            showToast(`Timelapse resumed from frame ${data.resumed_from_frame}`, 'success');
+            
+            // Force UI update
+            await checkStatus();
+        } else {
+            alert('Error resuming: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error resuming timelapse:', error);
+        alert('Error resuming timelapse');
     }
 }
 

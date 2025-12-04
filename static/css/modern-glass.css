@@ -540,6 +540,11 @@ input[type="checkbox"]:checked::before {
     box-shadow: 0 5px 20px rgba(255, 107, 107, 0.3);
 }
 
+.btn-warning {
+    background: linear-gradient(135deg, var(--warning-color), #FFA000);
+    box-shadow: 0 5px 20px rgba(255, 193, 7, 0.3);
+}
+
 .btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
@@ -693,7 +698,8 @@ input[type="checkbox"]:checked::before {
 }
 
 /* Time-based Interval Controls */
-.variable-intervals-container {
+.variable-intervals-container,
+.timestamp-config-container {
     background: rgba(255, 255, 255, 0.05);
     border-radius: var(--radius-md);
     padding: var(--spacing-md);

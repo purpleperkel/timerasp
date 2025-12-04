@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from flask import Flask, render_template, jsonify, request, send_file, Response
 import glob
+from PIL import Image, ImageDraw, ImageFont
 
 app = Flask(__name__)
 
@@ -22,6 +23,7 @@ DATA_DIR = BASE_DIR / "timelapse_data"
 IMAGES_DIR = DATA_DIR / "images"
 VIDEOS_DIR = DATA_DIR / "videos"
 CONFIG_FILE = BASE_DIR / "config" / "settings.json"
+SESSIONS_STATE_FILE = BASE_DIR / "config" / "sessions_state.json"
 
 # Ensure directories exist
 IMAGES_DIR.mkdir(parents=True, exist_ok=True)
@@ -31,17 +33,31 @@ CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
 # Global state
 timelapse_state = {
     "active": False,
+    "paused": False,              # New: Track if session is paused
     "current_session": None,
     "interval": 5,  # seconds (default/fallback)
     "total_frames": 0,
     "start_time": None,
+    "pause_time": None,           # New: When the session was paused
+    "total_pause_duration": 0,    # New: Total time spent paused (seconds)
     "scheduled_start": None,  # ISO datetime string
     "scheduled_end": None,    # ISO datetime string
     "thread": None,
     "waiting_for_start": False,
     "use_variable_intervals": False,
     "interval_schedule": [],  # List of time-based interval periods
-    "current_interval": 5     # Current active interval (may change based on time)
+    "current_interval": 5,     # Current active interval (may change based on time)
+    "resolution": [1920, 1080], # New: Store resolution for resume
+    "last_frame_number": 0,     # New: Track last frame for resume
+    "timestamp_config": {        # New: Timestamp overlay configuration
+        "enabled": False,
+        "format": "%Y-%m-%d %H:%M:%S",
+        "position": "bottom-right",
+        "font_size": 30,
+        "font_color": (255, 255, 255),
+        "background_color": (0, 0, 0, 128),
+        "margin": 20
+    }
 }
 
 camera_lock = threading.Lock()
@@ -56,6 +72,94 @@ def load_config():
         "resolution": [1920, 1080],
         "camera_type": "auto"  # auto, picamera, libcamera, or usb
     }
+
+def save_config(config):
+    """Save configuration to file"""
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(config, f, indent=2)
+
+def save_session_state():
+    """Save current session state to file for persistence"""
+    state_to_save = {
+        "active": timelapse_state["active"],
+        "paused": timelapse_state["paused"],
+        "current_session": timelapse_state["current_session"],
+        "interval": timelapse_state["interval"],
+        "total_frames": timelapse_state["total_frames"],
+        "start_time": timelapse_state["start_time"],
+        "pause_time": timelapse_state["pause_time"],
+        "total_pause_duration": timelapse_state["total_pause_duration"],
+        "scheduled_start": timelapse_state["scheduled_start"],
+        "scheduled_end": timelapse_state["scheduled_end"],
+        "use_variable_intervals": timelapse_state["use_variable_intervals"],
+        "interval_schedule": timelapse_state["interval_schedule"],
+        "resolution": timelapse_state["resolution"],
+        "last_frame_number": timelapse_state["last_frame_number"]
+    }
+    
+    try:
+        with open(SESSIONS_STATE_FILE, 'w') as f:
+            json.dump(state_to_save, f, indent=2)
+        return True
+    except Exception as e:
+        print(f"Error saving session state: {e}")
+        return False
+
+def load_session_state():
+    """Load saved session state from file"""
+    if not SESSIONS_STATE_FILE.exists():
+        return None
+    
+    try:
+        with open(SESSIONS_STATE_FILE, 'r') as f:
+            saved_state = json.load(f)
+        return saved_state
+    except Exception as e:
+        print(f"Error loading session state: {e}")
+        return None
+
+def clear_session_state():
+    """Clear the saved session state file"""
+    try:
+        if SESSIONS_STATE_FILE.exists():
+            SESSIONS_STATE_FILE.unlink()
+        return True
+    except Exception as e:
+        print(f"Error clearing session state: {e}")
+        return False
+
+def restore_session_from_state():
+    """Restore a paused session from saved state on startup"""
+    saved_state = load_session_state()
+    if not saved_state:
+        return False
+    
+    # Only restore if session was paused (not just active)
+    if saved_state.get("paused") and saved_state.get("current_session"):
+        # Check if session directory still exists
+        session_dir = IMAGES_DIR / saved_state["current_session"]
+        if not session_dir.exists():
+            print(f"Session directory {session_dir} not found, cannot restore")
+            clear_session_state()
+            return False
+        
+        # Restore state
+        for key in ["current_session", "interval", "total_frames", "start_time", 
+                    "pause_time", "total_pause_duration", "scheduled_start", 
+                    "scheduled_end", "use_variable_intervals", "interval_schedule",
+                    "resolution", "last_frame_number"]:
+            if key in saved_state:
+                timelapse_state[key] = saved_state[key]
+        
+        timelapse_state["paused"] = True
+        timelapse_state["active"] = False  # Not active until resumed
+        
+        print(f"Restored paused session: {saved_state['current_session']} with {saved_state['total_frames']} frames")
+        return True
+    
+    # Clear state if session wasn't paused
+    clear_session_state()
+    return False
 
 def save_config(config):
     """Save configuration to file"""
@@ -91,6 +195,122 @@ def detect_camera():
         pass
     
     return None
+
+def add_timestamp_to_image(image_path, timestamp_config):
+    """Add timestamp overlay to an image
+    
+    Args:
+        image_path: Path to the image file
+        timestamp_config: Dict with timestamp settings:
+            - enabled: bool
+            - format: str (strftime format)
+            - position: str (top-left, top-right, bottom-left, bottom-right, center)
+            - font_size: int
+            - font_color: tuple (R, G, B)
+            - background_color: tuple (R, G, B, A) or None
+            - margin: int (pixels from edge)
+    """
+    if not timestamp_config.get('enabled', False):
+        return
+    
+    try:
+        # Open the image
+        img = Image.open(image_path)
+        draw = ImageDraw.Draw(img)
+        
+        # Get timestamp text
+        timestamp_format = timestamp_config.get('format', '%Y-%m-%d %H:%M:%S')
+        timestamp_text = datetime.now().strftime(timestamp_format)
+        
+        # Font settings
+        font_size = timestamp_config.get('font_size', 30)
+        try:
+            # Try to use a better font if available
+            from PIL import ImageFont
+            try:
+                # Try common font paths
+                font_paths = [
+                    '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+                    '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
+                    '/System/Library/Fonts/Helvetica.ttc',
+                ]
+                font = None
+                for font_path in font_paths:
+                    if Path(font_path).exists():
+                        font = ImageFont.truetype(font_path, font_size)
+                        break
+                if not font:
+                    font = ImageFont.load_default()
+            except:
+                font = ImageFont.load_default()
+        except:
+            # Fallback if PIL.ImageFont not available
+            font = None
+        
+        # Calculate text size
+        if font:
+            bbox = draw.textbbox((0, 0), timestamp_text, font=font)
+            text_width = bbox[2] - bbox[0]
+            text_height = bbox[3] - bbox[1]
+        else:
+            # Estimate for default font
+            text_width = len(timestamp_text) * 10
+            text_height = 20
+        
+        # Calculate position
+        margin = timestamp_config.get('margin', 20)
+        position = timestamp_config.get('position', 'bottom-right')
+        
+        if position == 'top-left':
+            x = margin
+            y = margin
+        elif position == 'top-right':
+            x = img.width - text_width - margin
+            y = margin
+        elif position == 'bottom-left':
+            x = margin
+            y = img.height - text_height - margin
+        elif position == 'bottom-right':
+            x = img.width - text_width - margin
+            y = img.height - text_height - margin
+        elif position == 'center':
+            x = (img.width - text_width) // 2
+            y = (img.height - text_height) // 2
+        else:
+            x = img.width - text_width - margin
+            y = img.height - text_height - margin
+        
+        # Add background if specified
+        bg_color = timestamp_config.get('background_color', (0, 0, 0, 128))
+        if bg_color:
+            # Create a semi-transparent overlay
+            overlay = Image.new('RGBA', img.size, (255, 255, 255, 0))
+            overlay_draw = ImageDraw.Draw(overlay)
+            padding = 5
+            overlay_draw.rectangle(
+                [x - padding, y - padding, x + text_width + padding, y + text_height + padding],
+                fill=bg_color
+            )
+            # Composite the overlay
+            img = img.convert('RGBA')
+            img = Image.alpha_composite(img, overlay)
+            img = img.convert('RGB')
+            draw = ImageDraw.Draw(img)
+        
+        # Draw text
+        font_color = timestamp_config.get('font_color', (255, 255, 255))
+        if font:
+            draw.text((x, y), timestamp_text, fill=font_color, font=font)
+        else:
+            draw.text((x, y), timestamp_text, fill=font_color)
+        
+        # Save the image
+        img.save(image_path, 'JPEG', quality=95)
+        return True
+        
+    except Exception as e:
+        print(f"Error adding timestamp to image: {e}")
+        return False
 
 def capture_image(session_id, frame_number, resolution=(1920, 1080)):
     """Capture a single image"""
@@ -131,6 +351,10 @@ def capture_image(session_id, frame_number, resolution=(1920, 1080)):
     else:
         raise Exception("No camera detected")
     
+    # Add timestamp if enabled
+    if filename.exists() and timelapse_state.get("timestamp_config", {}).get("enabled", False):
+        add_timestamp_to_image(filename, timelapse_state["timestamp_config"])
+    
     return filename.exists()
 
 def get_current_interval_from_schedule(schedule):
@@ -158,17 +382,17 @@ def get_current_interval_from_schedule(schedule):
     
     return None  # No matching period
 
-def timelapse_worker(session_id, interval, resolution, scheduled_start=None, scheduled_end=None):
-    """Background worker for capturing timelapse frames with support for variable intervals"""
-    frame_number = 0
+def timelapse_worker(session_id, interval, resolution, scheduled_start=None, scheduled_end=None, resume_from_frame=0):
+    """Background worker for capturing timelapse frames with support for variable intervals and pause/resume"""
+    frame_number = resume_from_frame  # Start from resume point if provided
     
-    # Wait for scheduled start if specified
-    if scheduled_start:
+    # Wait for scheduled start if specified (only if not resuming)
+    if scheduled_start and resume_from_frame == 0:
         timelapse_state["waiting_for_start"] = True
         start_dt = datetime.fromisoformat(scheduled_start.replace('Z', '+00:00'))
         
         while datetime.now(start_dt.tzinfo or None) < start_dt:
-            if not timelapse_state["active"]:
+            if not timelapse_state["active"] or timelapse_state["paused"]:
                 timelapse_state["waiting_for_start"] = False
                 return
             time.sleep(1)
@@ -176,7 +400,7 @@ def timelapse_worker(session_id, interval, resolution, scheduled_start=None, sch
         timelapse_state["waiting_for_start"] = False
         timelapse_state["start_time"] = datetime.now().isoformat()
     
-    while timelapse_state["active"]:
+    while timelapse_state["active"] and not timelapse_state["paused"]:
         # Check if we've reached scheduled end time
         if scheduled_end:
             end_dt = datetime.fromisoformat(scheduled_end.replace('Z', '+00:00'))
@@ -192,6 +416,7 @@ def timelapse_worker(session_id, interval, resolution, scheduled_start=None, sch
             if success:
                 frame_number += 1
                 timelapse_state["total_frames"] = frame_number
+                timelapse_state["last_frame_number"] = frame_number  # Track for resume
             
             # Determine the interval to use
             current_interval = interval  # Default
@@ -206,12 +431,20 @@ def timelapse_worker(session_id, interval, resolution, scheduled_start=None, sch
                         timelapse_state["current_interval"] = current_interval
                         print(f"Interval changed to {current_interval} seconds based on schedule")
             
-            # Wait for the interval
-            time.sleep(current_interval)
+            # Wait for the interval, checking for pause
+            for _ in range(int(current_interval)):
+                if timelapse_state["paused"] or not timelapse_state["active"]:
+                    break
+                time.sleep(1)
             
         except Exception as e:
             print(f"Error capturing frame: {e}")
             time.sleep(1)
+    
+    # Worker ended - check if paused
+    if timelapse_state["paused"]:
+        print(f"Timelapse paused at frame {frame_number}")
+        save_session_state()
 
 def compile_video(session_id, fps=30, rotation=0):
     """Compile images into a video using ffmpeg"""
@@ -302,13 +535,16 @@ def camera_info():
 
 @app.route('/api/status')
 def get_status():
-    """Get current timelapse status including variable interval information"""
+    """Get current timelapse status including variable interval and pause information"""
     status_data = {
         "active": timelapse_state["active"],
+        "paused": timelapse_state["paused"],
         "session_id": timelapse_state["current_session"],
         "interval": timelapse_state["interval"],
         "total_frames": timelapse_state["total_frames"],
         "start_time": timelapse_state["start_time"],
+        "pause_time": timelapse_state.get("pause_time"),
+        "total_pause_duration": timelapse_state.get("total_pause_duration", 0),
         "scheduled_start": timelapse_state.get("scheduled_start"),
         "scheduled_end": timelapse_state.get("scheduled_end"),
         "waiting_for_start": timelapse_state.get("waiting_for_start", False),
@@ -338,19 +574,34 @@ def start_timelapse():
     use_variable_intervals = data.get('use_variable_intervals', False)
     interval_schedule = data.get('interval_schedule', [])
     
+    # Timestamp configuration
+    timestamp_config = data.get('timestamp_config', {})
+    if timestamp_config:
+        # Merge with defaults
+        default_timestamp = timelapse_state["timestamp_config"].copy()
+        default_timestamp.update(timestamp_config)
+        timestamp_config = default_timestamp
+    
     # Create new session
     session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     # Update state
     timelapse_state["active"] = True
+    timelapse_state["paused"] = False  # Clear any pause state
     timelapse_state["current_session"] = session_id
     timelapse_state["interval"] = interval
+    timelapse_state["resolution"] = resolution  # Store for resume
     timelapse_state["total_frames"] = 0
+    timelapse_state["last_frame_number"] = 0
+    timelapse_state["total_pause_duration"] = 0
+    timelapse_state["pause_time"] = None
     timelapse_state["scheduled_start"] = scheduled_start
     timelapse_state["scheduled_end"] = scheduled_end
     timelapse_state["use_variable_intervals"] = use_variable_intervals
     timelapse_state["interval_schedule"] = interval_schedule
     timelapse_state["current_interval"] = interval  # Start with default
+    if timestamp_config:
+        timelapse_state["timestamp_config"] = timestamp_config
     
     if not scheduled_start:
         timelapse_state["start_time"] = datetime.now().isoformat()
@@ -400,6 +651,87 @@ def stop_timelapse():
         "success": True,
         "session_id": session_id,
         "total_frames": total_frames
+    })
+
+@app.route('/api/pause', methods=['POST'])
+def pause_timelapse():
+    """Pause the current timelapse"""
+    if not timelapse_state["active"]:
+        if timelapse_state["paused"]:
+            return jsonify({"error": "Timelapse already paused"}), 400
+        return jsonify({"error": "No active timelapse to pause"}), 400
+    
+    # Set pause state
+    timelapse_state["paused"] = True
+    timelapse_state["pause_time"] = datetime.now().isoformat()
+    timelapse_state["active"] = False
+    
+    # Wait for thread to finish
+    if timelapse_state["thread"]:
+        timelapse_state["thread"].join(timeout=10)
+    
+    # Save state to file for persistence
+    save_session_state()
+    
+    return jsonify({
+        "success": True,
+        "session_id": timelapse_state["current_session"],
+        "total_frames": timelapse_state["total_frames"],
+        "paused_at": timelapse_state["pause_time"]
+    })
+
+@app.route('/api/resume', methods=['POST'])
+def resume_timelapse():
+    """Resume a paused timelapse"""
+    if timelapse_state["active"]:
+        return jsonify({"error": "Timelapse is already active"}), 400
+    
+    if not timelapse_state["paused"]:
+        return jsonify({"error": "No paused timelapse to resume"}), 400
+    
+    if not timelapse_state["current_session"]:
+        return jsonify({"error": "No session to resume"}), 400
+    
+    # Calculate pause duration and add to total
+    if timelapse_state["pause_time"]:
+        pause_time = datetime.fromisoformat(timelapse_state["pause_time"])
+        pause_duration = (datetime.now() - pause_time).total_seconds()
+        timelapse_state["total_pause_duration"] += pause_duration
+    
+    # Reset pause state
+    timelapse_state["paused"] = False
+    timelapse_state["pause_time"] = None
+    timelapse_state["active"] = True
+    
+    # Restore resolution if not set
+    if "resolution" not in timelapse_state or not timelapse_state["resolution"]:
+        timelapse_state["resolution"] = [1920, 1080]
+    
+    # Clear saved state file
+    clear_session_state()
+    
+    # Restart worker thread from last frame
+    session_id = timelapse_state["current_session"]
+    interval = timelapse_state["interval"]
+    resolution = timelapse_state["resolution"]
+    scheduled_start = timelapse_state.get("scheduled_start")
+    scheduled_end = timelapse_state.get("scheduled_end")
+    resume_frame = timelapse_state.get("last_frame_number", 0)
+    
+    thread = threading.Thread(
+        target=timelapse_worker,
+        args=(session_id, interval, resolution, scheduled_start, scheduled_end, resume_frame),
+        daemon=True
+    )
+    thread.start()
+    timelapse_state["thread"] = thread
+    
+    return jsonify({
+        "success": True,
+        "session_id": session_id,
+        "resumed_from_frame": resume_frame,
+        "total_frames": timelapse_state["total_frames"],
+        "total_pause_duration": timelapse_state["total_pause_duration"]
     })
 
 @app.route('/api/compile', methods=['POST'])
@@ -903,4 +1235,8 @@ def cancel_shutdown():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
+    # Try to restore any paused sessions on startup
+    if restore_session_from_state():
+        print("Restored paused session from previous run")
+    
     app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)

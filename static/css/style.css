@@ -201,6 +201,11 @@ h2 {
     color: white;
 }
 
+.btn-warning {
+    background: linear-gradient(135deg, #FFC107 0%, #FFA000 100%);
+    color: white;
+}
+
 .btn-secondary {
     background: #f0f0f0;
     color: #333;
@@ -452,7 +457,8 @@ h2 {
 }
 
 /* Time-based Interval Controls */
-.variable-intervals-container {
+.variable-intervals-container,
+.timestamp-config-container {
     background: #f9f9f9;
     border-radius: 10px;
     padding: 15px;

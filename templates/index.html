@@ -80,6 +80,69 @@
 
                 <div class="control-group">
                     <label>
+                        <input type="checkbox" id="timestampCheckbox">
+                        Add timestamp overlay to frames
+                    </label>
+                </div>
+
+                <div id="timestampControls" style="display: none;">
+                    <div class="timestamp-config-container">
+                        <p style="font-size: 0.9em; color: rgba(255, 255, 255, 0.7); margin-bottom: 15px;">
+                            Add date/time overlay to each captured frame
+                        </p>
+                        
+                        <div class="control-group">
+                            <label for="timestampFormat">Format:</label>
+                            <select id="timestampFormat">
+                                <option value="%Y-%m-%d %H:%M:%S">2024-01-15 14:30:45</option>
+                                <option value="%d/%m/%Y %H:%M:%S">15/01/2024 14:30:45</option>
+                                <option value="%m/%d/%Y %I:%M %p">01/15/2024 02:30 PM</option>
+                                <option value="%H:%M:%S">14:30:45</option>
+                                <option value="%Y-%m-%d">2024-01-15</option>
+                                <option value="%A, %B %d, %Y">Monday, January 15, 2024</option>
+                            </select>
+                        </div>
+                        
+                        <div class="control-group">
+                            <label for="timestampPosition">Position:</label>
+                            <select id="timestampPosition">
+                                <option value="top-left">Top Left</option>
+                                <option value="top-right">Top Right</option>
+                                <option value="bottom-left">Bottom Left</option>
+                                <option value="bottom-right" selected>Bottom Right</option>
+                                <option value="center">Center</option>
+                            </select>
+                        </div>
+                        
+                        <div class="control-group">
+                            <label for="timestampSize">Font Size:</label>
+                            <input type="range" id="timestampSize" min="10" max="100" value="30" class="slider">
+                            <span id="timestampSizeValue">30</span>px
+                        </div>
+                        
+                        <div class="control-group">
+                            <label for="timestampColor">Text Color:</label>
+                            <select id="timestampColor">
+                                <option value="255,255,255">White</option>
+                                <option value="0,0,0">Black</option>
+                                <option value="255,255,0">Yellow</option>
+                                <option value="255,0,0">Red</option>
+                                <option value="0,255,0">Green</option>
+                                <option value="0,0,255">Blue</option>
+                            </select>
+                        </div>
+                        
+                        <div class="control-group">
+                            <label>
+                                <input type="checkbox" id="timestampBackground" checked>
+                                Add semi-transparent background
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label>
                         <input type="checkbox" id="scheduleCheckbox">
                         Schedule start/end times
                     </label>
@@ -128,6 +191,8 @@
 
                 <div class="button-group">
                     <button id="startBtn" class="btn btn-primary">Start Timelapse</button>
+                    <button id="pauseBtn" class="btn btn-warning" style="display: none;">⏸️ Pause</button>
+                    <button id="resumeBtn" class="btn btn-success" style="display: none;">▶️ Resume</button>
                     <button id="stopBtn" class="btn btn-danger" style="display: none;">Stop Timelapse</button>
                     <button id="previewCurrentBtn" class="btn btn-secondary" style="display: none;">👁️ Preview Current</button>
                 </div>
