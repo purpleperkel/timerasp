@@ -66,7 +66,17 @@ cd "$INSTALL_DIR"
 
 # Install Python dependencies
 echo "🐍 Installing Python packages..."
-pip3 install --user --break-system-packages -r requirements.txt || pip3 install --user -r requirements.txt
+# Install core requirements first
+pip3 install --user --break-system-packages Flask==3.0.0 Werkzeug==3.0.1 2>/dev/null || \
+pip3 install --user Flask==3.0.0 Werkzeug==3.0.1
+
+# Try to install Pillow for timestamp feature
+echo "Attempting to install Pillow for timestamp overlay feature..."
+pip3 install --user --break-system-packages Pillow==11.0.0 2>/dev/null || \
+pip3 install --user Pillow==11.0.0 2>/dev/null || {
+    echo "ℹ️  Pillow not installed - timestamp overlay will be disabled"
+    echo "    TimelapsePI will work normally without timestamps"
+}
 
 # Make app.py executable
 chmod +x app.py

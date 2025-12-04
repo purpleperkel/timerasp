@@ -65,7 +65,22 @@ python3 -m venv venv
 echo "📦 Installing Python packages in virtual environment..."
 source venv/bin/activate
 pip install --upgrade pip
-pip install -r requirements.txt
+
+# Install core requirements first
+echo "Installing core packages (Flask, Werkzeug)..."
+pip install Flask==3.0.0 Werkzeug==3.0.1
+
+# Try to install Pillow for timestamp feature
+echo "Attempting to install Pillow for timestamp overlay feature..."
+pip install Pillow==11.0.0 2>/dev/null || {
+    echo "⚠️  Pillow installation failed - trying alternative version..."
+    pip install Pillow 2>/dev/null || {
+        echo "ℹ️  Pillow not installed - timestamp overlay feature will be disabled"
+        echo "    TimelapsePI will work normally without timestamps"
+        echo "    Run ./fix_pillow.sh later if you want to enable timestamps"
+    }
+}
+
 deactivate
 
 echo "✅ Python packages installed in venv"

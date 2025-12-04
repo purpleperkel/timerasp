@@ -13,7 +13,14 @@ from datetime import datetime
 from pathlib import Path
 from flask import Flask, render_template, jsonify, request, send_file, Response
 import glob
-from PIL import Image, ImageDraw, ImageFont
+
+# Try to import PIL, but don't fail if not available
+try:
+    from PIL import Image, ImageDraw, ImageFont
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+    print("Warning: Pillow not installed. Timestamp overlay feature will be disabled.")
 
 app = Flask(__name__)
 
@@ -212,6 +219,10 @@ def add_timestamp_to_image(image_path, timestamp_config):
     """
     if not timestamp_config.get('enabled', False):
         return
+    
+    if not PIL_AVAILABLE:
+        print("Warning: Pillow not installed, skipping timestamp overlay")
+        return False
     
     try:
         # Open the image
